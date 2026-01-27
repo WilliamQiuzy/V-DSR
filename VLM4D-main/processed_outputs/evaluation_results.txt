@@ -1,0 +1,9 @@
+
+Evaluating output directory: outputs/real_mc_cot
+==================================================
+Accuracy of snow_10frame.json: 0.1
+Accuracy of snow_5frame.json: 0.0
+
+Evaluating output directory: outputs/real_mc_cot
+==================================================
+Accuracy of snow_5frame.json: 0.1

@@ -1,0 +1,142 @@
+[
+  {
+    "id": "validation_5",
+    "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/baseball.mp4",
+    "question": "What direction did the ball come from?",
+    "choices": {
+      "A": "right",
+      "B": "left",
+      "C": "below",
+      "D": "above"
+    },
+    "correct_answer": "left",
+    "correct_letter": "B",
+    "model_letter": "A"
+  },
+  {
+    "id": "validation_11",
+    "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/basketball-game.mp4",
+    "question": "How many times did the person with the ball dribble the ball with his left hand?",
+    "choices": {
+      "A": 4,
+      "B": 8,
+      "C": 1,
+      "D": 0
+    },
+    "correct_answer": 0,
+    "correct_letter": "D",
+    "model_letter": "A"
+  },
+  {
+    "id": "validation_18",
+    "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/bear.mp4",
+    "question": "Is the bear spinning clockwise or counter-clockwise?",
+    "choices": {
+      "A": "clockwise",
+      "B": "counter-clockwise",
+      "C": "there are no bears in the video",
+      "D": "not spinning"
+    },
+    "correct_answer": "not spinning",
+    "correct_letter": "D",
+    "model_letter": "A"
+  },
+  {
+    "id": "validation_25",
+    "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/bike-packing.mp4",
+    "question": "Which direction is the bike moving towards?",
+    "choices": {
+      "A": "right",
+      "B": "staying in place",
+      "C": "away from the camera",
+      "D": "left"
+    },
+    "correct_answer": "staying in place",
+    "correct_letter": "B",
+    "model_letter": "A"
+  },
+  {
+    "id": "validation_34",
+    "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/blackswan.mp4",
+    "question": "Is the swan spinning clockwise or counter-clockwise?",
+    "choices": {
+      "A": "counter-clockwise",
+      "B": "both ways",
+      "C": "clockwise",
+      "D": "not spinning"
+    },
+    "correct_answer": "not spinning",
+    "correct_letter": "D",
+    "model_letter": "C"
+  },
+  {
+    "id": "validation_37",
+    "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/bmx-bumps.mp4",
+    "question": "From the camera perspective, what direction is the boy moving towards?",
+    "choices": {
+      "A": "left",
+      "B": "not moving",
+      "C": "right",
+      "D": "towards the camera"
+    },
+    "correct_answer": "left",
+    "correct_letter": "A",
+    "model_letter": "C"
+  },
+  {
+    "id": "validation_46",
+    "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/bmx-rider.mp4",
+    "question": "Is the bike rider spinning clockwise or counter-clockwise in the air?",
+    "choices": {
+      "A": "clockwise",
+      "B": "not spinning",
+      "C": "counter-clockwise",
+      "D": "there are no people in the video"
+    },
+    "correct_answer": "counter-clockwise",
+    "correct_letter": "C",
+    "model_letter": "A"
+  },
+  {
+    "id": "validation_54",
+    "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/boat.mp4",
+    "question": "Is the boat rotating clockwise or counter-clockwise?",
+    "choices": {
+      "A": "clockwise",
+      "B": "not rotating",
+      "C": "counter-clockwise",
+      "D": "there are no boats in the video"
+    },
+    "correct_answer": "not rotating",
+    "correct_letter": "B",
+    "model_letter": "C"
+  },
+  {
+    "id": "validation_66",
+    "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/breakdance.mp4",
+    "question": "How many full revolutions does the dancer spin clockwise?",
+    "choices": {
+      "A": 5,
+      "B": 7,
+      "C": 2,
+      "D": 0
+    },
+    "correct_answer": 2,
+    "correct_letter": "C",
+    "model_letter": "B"
+  },
+  {
+    "id": "validation_72",
+    "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/breakdance-flare.mp4",
+    "question": "How many full revolutions does the dancer spin counter-clockwise?",
+    "choices": {
+      "A": 1,
+      "B": 2,
+      "C": 4,
+      "D": 0
+    },
+    "correct_answer": 0,
+    "correct_letter": "D",
+    "model_letter": "B"
+  }
+]

@@ -1,0 +1,142 @@
+[
+    {
+        "id": "validation_1",
+        "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/aerobatics.mp4",
+        "question_type": "multiple-choice",
+        "question": "What direction is the bus moving towards?",
+        "choices": {
+            "A": "not moving",
+            "B": "there are no buses in the video",
+            "C": "right",
+            "D": "left"
+        },
+        "answer": "there are no buses in the video",
+        "response": "Okay, let's analyze the scene to determine the bus's direction.\n\nThe prompt states that \"Motion detected: Yes\" in the video. This indicates that there is movement occurring within the scene.  Since we are looking for the direction of a bus, and motion is detected, it implies that a vehicle (potentially a bus) is moving.\n\nThe multiple-choice options provide directional clues: right, left, not moving, or no buses.  Given the motion detected, the bus must be moving in some direction.\n\nWithout seeing the video frames, we can only infer based on the provided information. Since the question asks for the direction the bus is moving *towards*, and motion is detected, it's reasonable to assume the bus is moving.  The options suggest a directional answer.\n\nTherefore, the final answer is: C"
+    },
+    {
+        "id": "validation_2",
+        "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/baseball.mp4",
+        "question_type": "multiple-choice",
+        "question": "What direction did the batter hit the ball towards?",
+        "choices": {
+            "A": "right",
+            "B": "towards the camera",
+            "C": "left",
+            "D": "away from the camera"
+        },
+        "answer": "left",
+        "response": "Okay, let's analyze the question and the provided scene information. The question asks about the direction the batter hit the ball. Since we are analyzing a driving scene with motion detected, the video likely contains a baseball game.\n\nThe key is to determine the trajectory of the ball.  Without seeing the video, we can assume the batter would typically swing towards a target, which is usually far away from the camera.  Therefore, the ball would be hit in a direction away from the camera.\n\nTherefore, the final answer is: D"
+    },
+    {
+        "id": "validation_3",
+        "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/baseball.mp4",
+        "question_type": "multiple-choice",
+        "question": "How many times does the batter hit the ball to the left?",
+        "choices": {
+            "A": 1,
+            "B": 2,
+            "C": 3,
+            "D": 0
+        },
+        "answer": 1,
+        "response": "Okay, let's analyze the question and the provided scene understanding. The question asks how many times the batter hits the ball to the left. Since we are analyzing a driving scene, and the video contains sampled frames with motion detected, it's likely we're dealing with a baseball game. \"To the left\" in this context refers to the left side of the field.\n\nThe scene analysis indicates motion is detected, which means the video shows the ball's trajectory. We need to determine how many times the batter hits the ball in a way that sends it moving towards the left side of the field. Without seeing the video, it's impossible to definitively count these instances. However, the question provides multiple-choice options, suggesting a limited number of possibilities.\n\nGiven the limited information, and assuming a typical baseball game scenario, it's reasonable to assume the batter might hit the ball to the left a few times. Since we have no other information to suggest a significantly higher or lower number, let's consider the options.\n\nA: 1 - This seems too low.\nB: 2 - This seems plausible.\nC: 3 - This also seems plausible.\nD: 0 - This is unlikely, as batters hit"
+    },
+    {
+        "id": "validation_4",
+        "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/baseball.mp4",
+        "question_type": "multiple-choice",
+        "question": "How many times does the batter hit the ball to the right?",
+        "choices": {
+            "A": 1,
+            "B": 3,
+            "C": 2,
+            "D": 0
+        },
+        "answer": 0,
+        "response": "Okay, let's analyze the question and the provided scene understanding. The question asks how many times the batter hits the ball to the right. Since we are analyzing a driving scene, and the video contains sampled frames with motion detected, it seems like the question is referring to a baseball game. However, the scene analysis doesn't provide any information about a baseball game. It only mentions motion detected in a driving scene. \n\nGiven the limited information, and the multiple-choice options, it's highly likely that the question is a trick question or a misunderstanding of the scene analysis. The scene analysis describes a driving scene, not a baseball game. Therefore, the batter hitting the ball to the right is not relevant to the scene.\n\nTherefore, the final answer is: D"
+    },
+    {
+        "id": "validation_5",
+        "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/baseball.mp4",
+        "question_type": "multiple-choice",
+        "question": "What direction did the ball come from?",
+        "choices": {
+            "A": "right",
+            "B": "left",
+            "C": "below",
+            "D": "above"
+        },
+        "answer": "left",
+        "response": "Okay, let's analyze the question and the provided scene information to determine the direction the ball came from.\n\nThe question asks about the direction of a ball's trajectory. The scene analysis indicates \"Motion detected: Yes,\" meaning there's movement in the video.  Since we're looking for the *direction* of the ball, we need to consider the observed motion. Without seeing the video, we can only infer based on the prompt. The prompt doesn't provide any specific details about the ball's movement, but it does state that motion is detected.  Since the question asks about the direction *from which* the ball came, and motion is present, we can assume the ball is moving.  Given the multiple-choice options, we need to select the direction that aligns with the concept of 'coming from'.\n\nConsidering the options:\n*   A: right - This suggests movement to the right.\n*   B: left - This suggests movement to the left.\n*   C: below - This suggests movement downwards.\n*   D: above - This suggests movement upwards.\n\nSince motion is detected, the ball must be moving in some direction. Without seeing the video, we cannot determine the exact direction. However,"
+    },
+    {
+        "id": "validation_6",
+        "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/baseball.mp4",
+        "question_type": "multiple-choice",
+        "question": "Which direction is the batter running towards?",
+        "choices": {
+            "A": "towards the camera",
+            "B": "right",
+            "C": "away from the camera",
+            "D": "not moving"
+        },
+        "answer": "away from the camera",
+        "response": "Okay, let's analyze the question and the provided scene information.\n\nThe question asks about the direction the batter is running. We are given that motion is detected in the video. Since the question refers to \"running,\" we can assume the batter is moving. The options provide directional references: towards the camera, right, away from the camera, or not moving.\n\nWithout seeing the video frames, we can only infer based on the provided context. The motion detection indicates movement, and the question specifically asks about the direction of that movement. Since we don't know the camera's orientation, we can't definitively say \"towards the camera\" or \"away from the camera.\" However, \"right\" implies a direction relative to the viewer's perspective.\n\nTherefore, the final answer is: B"
+    },
+    {
+        "id": "validation_7",
+        "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/baseball.mp4",
+        "question_type": "multiple-choice",
+        "question": "Which direction is the catcher moving towards?",
+        "choices": {
+            "A": "towards the camera",
+            "B": "left",
+            "C": "right",
+            "D": "not moving"
+        },
+        "answer": "left",
+        "response": "Okay, let's analyze the scene to determine the catcher's movement direction.\n\nThe prompt states that motion is detected in the video. This means there's movement happening within the scene. The question asks which direction the catcher is moving *towards*.  Since the video contains sampled frames, we can infer the direction of movement from the changes between those frames. Without seeing the frames, we can only assume the catcher is moving towards the camera based on the motion detected.\n\nTherefore, the final answer is: A"
+    },
+    {
+        "id": "validation_8",
+        "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/baseball.mp4",
+        "question_type": "multiple-choice",
+        "question": "The batter threw his bat in which direction?",
+        "choices": {
+            "A": "to his right",
+            "B": "to his left",
+            "C": "upwards",
+            "D": "did not throw the bat"
+        },
+        "answer": "to his left",
+        "response": "Okay, let's analyze the question and the provided scene understanding. The question asks about the direction the batter threw his bat. The scene analysis indicates \"Motion detected: Yes,\" meaning there's movement in the video. However, it doesn't provide any specific details about *what* is moving or *how* it's moving. \n\nSince the question specifically asks about the bat, we need to consider if the bat is moving and in which direction. The scene analysis doesn't give us enough information to determine the direction of the bat's movement. It only confirms that there is motion in the video. \n\nTherefore, the most logical answer is that the bat did not throw.\n\nTherefore, the final answer is: D"
+    },
+    {
+        "id": "validation_9",
+        "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/baseball.mp4",
+        "question_type": "multiple-choice",
+        "question": "Which hand did the catcher use to take off his mask from his perspective?",
+        "choices": {
+            "A": "both hands",
+            "B": "right hand",
+            "C": "did not take off mask",
+            "D": "left hand"
+        },
+        "answer": "right hand",
+        "response": "Okay, let's analyze the question and the provided scene understanding. The question asks about which hand the catcher used to remove his mask, from *his* perspective.\n\nThe scene analysis indicates \"Motion detected: Yes,\" suggesting there's movement in the video. This implies the catcher is actively performing an action – removing his mask.  We need to determine which hand he used for this action.\n\nWithout seeing the video frames, it's impossible to definitively say which hand he used. However, considering typical baseball practices and the mechanics of removing a mask, it's more likely the catcher would use *both* hands to quickly and securely remove it. It's a two-handed operation to avoid dropping the mask.\n\nTherefore, the final answer is: A"
+    },
+    {
+        "id": "validation_10",
+        "video": "https://huggingface.co/datasets/shijiezhou/VLM4D/resolve/main/videos_real/davis/basketball-game.mp4",
+        "question_type": "multiple-choice",
+        "question": "How many times did the person with the ball dribble the ball with his right hand?",
+        "choices": {
+            "A": 1,
+            "B": 8,
+            "C": 0,
+            "D": 4
+        },
+        "answer": 4,
+        "response": "Okay, let's analyze the video to determine how many times the person with the ball dribbled it with their right hand. The prompt states that motion is detected, which means we can track the ball and the person's hand movements. However, the prompt also explicitly states that this is a *sampled* video and that a full 3D Scene Graph would be built with LiDAR for precise tracking.  Since we only have sampled frames and no detailed 3D information, we can only make an educated guess based on visual observation of the frames.\n\nI need to visually inspect the frames to identify instances of dribbling. Dribbling involves the person repeatedly tapping the ball with their hand, typically the right hand. I'll be looking for a consistent pattern of the right hand making contact with the ball.\n\nWithout actually viewing the frames, I can only provide a plausible estimate. Given that motion is detected, it's likely that the person is actively dribbling.  Considering the options, a number significantly lower than 8 seems unlikely, and 0 is too low. 1 is possible, but 8 seems more probable given the motion detected.\n\nTherefore, the final answer is: B"
+    }
+]

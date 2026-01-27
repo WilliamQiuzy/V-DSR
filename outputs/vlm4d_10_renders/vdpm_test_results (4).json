@@ -1,0 +1,165 @@
+{
+  "model": "gpt-5-mini",
+  "eval_model": "o4-mini",
+  "total_frames": 32,
+  "vdpm_accuracy": 0.2,
+  "num_correct": 2,
+  "num_total": 10,
+  "correct_ids": [
+    "validation_37",
+    "validation_66"
+  ],
+  "wrong_ids": [
+    "validation_5",
+    "validation_11",
+    "validation_18",
+    "validation_25",
+    "validation_34",
+    "validation_46",
+    "validation_54",
+    "validation_72"
+  ],
+  "skipped_ids": [],
+  "eval_results": [
+    {
+      "id": "validation_5",
+      "question": "What direction did the ball come from?",
+      "choices": {
+        "A": "right",
+        "B": "left",
+        "C": "below",
+        "D": "above"
+      },
+      "response": "Step 1 — Video frames: In the early frames the ball is visible near the catcher on the right side of the image (catcher’s glove). As the sequence continues the ball moves toward the batter and then onward to the left side of the plate and down the first-base line. The frames thus show the ball traveling from the right side of the frame toward the left.\n\nStep 2 — Trajectory visualization: The motion lines centered around the batter/catcher area are colored cyan on the right and transition to red on the left (cyan = earlier, red = later). That color gradient indicates motion from right → left.\n\nPutting both sources together, the ball clearly traveled from the right side of the scene toward the left. Therefore, the final answer is: A",
+      "ground_truth_answer": "left",
+      "extracted_answer": "A: right",
+      "correct": false
+    },
+    {
+      "id": "validation_11",
+      "question": "How many times did the person with the ball dribble the ball with his left hand?",
+      "choices": {
+        "A": 4,
+        "B": 8,
+        "C": 1,
+        "D": 0
+      },
+      "response": "Step 1 — identify the ball‑handler and follow the ball in the frames:\n- The ball‑handler is the player near the lower center of the court who has possession throughout the sequence. In the video frames you can see the ball repeatedly moving down toward the court and back up near that player's body (typical dribble motion).\n- I tracked the ball across consecutive frames: it alternates between being close to the player's torso/legs and being low near the court surface several times, which are the dribble contacts.\n\nStep 2 — determine which hand is used for each dribble from the frames:\n- When the ball is on the player's left side (near his left leg) he reaches with his left hand; when it is on his right side he reaches with his right hand.\n- Examining the frames carefully, the ball is on the player’s left side (and the player’s left hand is extended toward it) on four distinct down‑up cycles while other cycles show it on the right side or being passed/held.\n\nStep 3 — confirm motion count and hand using the 3D trajectory visualization:\n- The 3D trajectory plot shows clusters of short, repeated up–down trajectories near the ball‑handler’s left side (these are the ball bounces), with the cyan→red color gradient marking time. Those clusters correspond to the moments the ball is bounced with the left hand.\n- The visualization shows four clear left‑side bounce trajectories (short, repeated vertical motions at successive times), supporting the frame‑by‑frame observation.\n\nCombining the frame sequence and the trajectory visualization, there are four distinct left‑hand dribble bounces. Therefore, the final answer is: A",
+      "ground_truth_answer": 0,
+      "extracted_answer": "A: 4",
+      "correct": false
+    },
+    {
+      "id": "validation_18",
+      "question": "Is the bear spinning clockwise or counter-clockwise?",
+      "choices": {
+        "A": "clockwise",
+        "B": "counter-clockwise",
+        "C": "there are no bears in the video",
+        "D": "not spinning"
+      },
+      "response": "Step 1 — inspect the video frames:\n- The sequence of frames shows one bear in the enclosure. Early frames (top rows) show the bear’s head and snout pointing toward the left side of the image; later frames (bottom rows) show the bear’s body and head gradually turning so the snout moves downward from the original leftward direction.\n- This indicates the bear is changing its facing direction over the sequence rather than remaining perfectly still.\n\nStep 2 — interpret the 3D trajectory visualization:\n- The motion streamlines over the bear are colored from cyan (earlier) to red (later).\n- The streamlines around the bear arc in a way that the earlier (cyan) positions are on the left/upper side and later (red) positions are on the lower/right side of the bear, consistent with a rotation that moves the bear’s front from left toward down/right.\n- That cyan→red progression around the body corresponds to a rotation in the clockwise sense when viewed from above/the camera.\n\nStep 3 — combine both observations:\n- The frames show the bear’s facing direction rotating from leftward toward downward/rightward.\n- The trajectory colors confirm the motion path moves in that same clockwise direction.\n\nTherefore, the final answer is: A",
+      "ground_truth_answer": "not spinning",
+      "extracted_answer": "A: clockwise",
+      "correct": false
+    },
+    {
+      "id": "validation_25",
+      "question": "Which direction is the bike moving towards?",
+      "choices": {
+        "A": "right",
+        "B": "staying in place",
+        "C": "away from the camera",
+        "D": "left"
+      },
+      "response": "Step 1 — video frames: The sequence shows a person lifting and rotating the bicycle: early frames have the bike/wheels more toward the left/center of the view, and over time the wheels and frame are shifted toward the right side of the images. The repeated frames show a clear lateral displacement of the bike to the right rather than staying fixed, moving left, or moving directly away from the camera.\n\nStep 2 — trajectory visualization: The 3D trajectory plot uses cyan for earlier positions and red for later positions. The colored traces for the bike/wheels run from cyan on the left toward red on the right, indicating the object’s positions progressed from left to right in the camera’s coordinate frame.\n\nCombining both observations (frame-by-frame lateral shift to the right and cyan→red trajectories pointing right), the bike is moving toward the right.\n\nTherefore, the final answer is: A",
+      "ground_truth_answer": "staying in place",
+      "extracted_answer": "A: right",
+      "correct": false
+    },
+    {
+      "id": "validation_34",
+      "question": "Is the swan spinning clockwise or counter-clockwise?",
+      "choices": {
+        "A": "counter-clockwise",
+        "B": "both ways",
+        "C": "clockwise",
+        "D": "not spinning"
+      },
+      "response": "Step 1 — Inspect the video frames:\n- Across the sequence of frames the swan’s body and neck do not stay fixed; the head/neck position shifts gradually to the right in the image plane. Early frames show the neck more vertical and the head slightly left of the later head position; later frames show the head displaced toward the viewer’s right side and the body also translated a bit that way.\n\nStep 2 — Use the trajectory visualization:\n- The point-cloud/trajectory image uses cyan for earlier positions and red for later positions. On the swan’s neck and body the short motion vectors go from cyan (left) toward red (right), showing the head and body moved rightward over time.\n- The direction of those vectors around the neck indicates the swan turned so that the head moved from left to right in the view, i.e. a rotation that goes in the clockwise sense from the viewer’s perspective.\n\nStep 3 — Combine both pieces of evidence:\n- The frame-by-frame image sequence shows the head/neck moving rightward over time, and the trajectory plot confirms earlier (cyan) positions are left of later (red) positions on the neck/body. Both indicate the swan’s rotation is clockwise from the camera viewpoint.\n\nTherefore, the final answer is: C",
+      "ground_truth_answer": "not spinning",
+      "extracted_answer": "C: clockwise",
+      "correct": false
+    },
+    {
+      "id": "validation_37",
+      "question": "From the camera perspective, what direction is the boy moving towards?",
+      "choices": {
+        "A": "left",
+        "B": "not moving",
+        "C": "right",
+        "D": "towards the camera"
+      },
+      "response": "Step 1 — video frames: scanning the sequence of frames shows the boy on the bike initially on the right side of the frames and then progressing across the scene toward the left side of the images; later frames show him nearer the left edge and eventually leaving the frame on the left. This indicates horizontal motion across the image from right to left, not motion toward the camera.\n\nStep 2 — trajectory visualization: the 3D trajectory lines originate in the textured region on the right and extend leftward. The color gradient (cyan = earlier, red = later) shows earlier positions on the right and later positions shifted to the left, confirming the object’s displacement is toward the left from the camera’s viewpoint.\n\nConclusion: both the frames and the colored trajectory confirm the boy is moving leftward in the camera view. Therefore, the final answer is: A",
+      "ground_truth_answer": "left",
+      "extracted_answer": "A: left",
+      "correct": true
+    },
+    {
+      "id": "validation_46",
+      "question": "Is the bike rider spinning clockwise or counter-clockwise in the air?",
+      "choices": {
+        "A": "clockwise",
+        "B": "not spinning",
+        "C": "counter-clockwise",
+        "D": "there are no people in the video"
+      },
+      "response": "Step 1 — look at the video frames:\n- The rider approaches from the right, rides up the right lip of the quarter pipe and launches into the air.\n- In the sequential frames you can see the rider go from upright, then their body and bike rotate so the wheels move up and over, the rider becomes upside-down, and then returns to upright to land and ride back down. Watching those frames in order shows a continuous rotation while airborne.\n\nStep 2 — use the trajectory visualization to confirm direction:\n- The trajectory colors show cyan = earlier positions on the right side of the ramp and red = later positions toward the left, matching the rider’s leftward travel across the lip.\n- The point/line traces of the bike parts (cyan → red) indicate the bike rotates with the front of the bike moving from the upper-right toward the upper-left as time progresses. That motion of the bike’s front and the rider’s head through the sequence corresponds to a clockwise rotation from the camera’s viewpoint.\n\nConclusion:\nTherefore, the final answer is: A",
+      "ground_truth_answer": "counter-clockwise",
+      "extracted_answer": "A: clockwise",
+      "correct": false
+    },
+    {
+      "id": "validation_54",
+      "question": "Is the boat rotating clockwise or counter-clockwise?",
+      "choices": {
+        "A": "clockwise",
+        "B": "not rotating",
+        "C": "counter-clockwise",
+        "D": "there are no boats in the video"
+      },
+      "response": "Step 1 — inspect the video frames: the boat is moving rightward across the frames. Comparing earlier frames (top rows) to later frames (bottom rows) the bow (front) shifts further to the right relative to the stern (rear) and the boat’s orientation turns so that the bow points more to the right over time.\n\nStep 2 — use the trajectory visualization: the color gradient (cyan → red) shows early positions on the left and later positions on the right. The short motion vectors around the hull indicate the front of the boat moved to the right relative to the rear, matching a rotation in the clockwise sense when viewed from above.\n\nConclusion: both the frame sequence and the cyan→red trajectory show the bow rotating toward the right (clockwise rotation).\n\nTherefore, the final answer is: A",
+      "ground_truth_answer": "not rotating",
+      "extracted_answer": "A: clockwise",
+      "correct": false
+    },
+    {
+      "id": "validation_66",
+      "question": "How many full revolutions does the dancer spin clockwise?",
+      "choices": {
+        "A": 5,
+        "B": 7,
+        "C": 2,
+        "D": 0
+      },
+      "response": "Step 1 — Inspect the video frames:\n- The frames show the same dancer doing a headspin-style breakdance move: he starts inverted and his body/feet rotate around his head while the crowd stays stationary.\n- Tracking a distinct visual marker (the red shoes / belt line) through the sequence: the shoes move from roughly upward in the frame, swing to the right side, then down, then left, then back toward the top — and this cycle of positions repeats. From the frame-by-frame progression you can see the dancer’s body passes the same orientation multiple times in a continuous clockwise turning motion (as seen from the camera).\n\nStep 2 — Use the 3D trajectory visualization:\n- The trajectory visualization shows radial, circular paths centered near the dancer’s head. The color gradient (cyan → red) indicates time: cyan marks earlier positions and red marks later positions.\n- The radial strokes form about two full circular loops around the center: the cyan starting arc continues around once and then a second time before reaching the red end positions. The color progression along those circular lines confirms two main loops rather than many tightly packed turns.\n\nStep 3 — Combine both observations:\n- The frame-by-frame orientations match the two-loop structure seen in the trajectory image: the shoes and torso complete two clockwise passes around the head center during the recorded segment.\n- There are clearly more than zero, and far fewer than five or seven full rotations; the evidence supports two complete clockwise revolutions.\n\nTherefore, the final answer is: C",
+      "ground_truth_answer": 2,
+      "extracted_answer": "C: 2",
+      "correct": true
+    },
+    {
+      "id": "validation_72",
+      "question": "How many full revolutions does the dancer spin counter-clockwise?",
+      "choices": {
+        "A": 1,
+        "B": 2,
+        "C": 4,
+        "D": 0
+      },
+      "response": "Step 1 — inspect the video frames:\n- The frames show a single dancer doing one-handed spins in place. Over the sequence you can see the dancer’s torso and leg configuration rotate steadily around a vertical axis: legs move from a mostly vertical position, sweep out to horizontal, then return vertical while the torso faces different directions.\n- Crucially, the same “pose orientation” (for example: the torso facing roughly the camera with one leg up) appears, then disappears and reappears again later in the sequence — indicating the dancer completed more than one full turn.\n\nStep 2 — use the trajectory visualization to determine actual motion direction and count revolutions:\n- The trajectory image uses cyan for earlier positions and red for later positions; the colored motion vectors around the dancer form circular arcs progressing from cyan → red in the counter-clockwise sense (when viewed from the camera), so the dancer’s spin direction is counter-clockwise.\n- The motion vectors are not just a single short arc: they wrap around the central axis more than once. The colored streamlines show two clear wraps (early cyan arcs on one side, then mid colors, then red arcs completing a second wrap), which matches the video evidence of the body passing the same orientation twice.\n\nStep 3 — combine both pieces of evidence to count full CCW revolutions:\n- From the frame-by-frame pose progression the dancer returns to the initial orientation twice.\n- From the trajectory plot the motion vectors make two full counter-clockwise passes around the center (cyan → red twice).\n\nTherefore, the final answer is: B",
+      "ground_truth_answer": 0,
+      "extracted_answer": "B: 2",
+      "correct": false
+    }
+  ]
+}

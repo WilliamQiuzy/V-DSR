@@ -1,0 +1,1 @@
+DINO_LARGE  = "./models/dinov2-large"

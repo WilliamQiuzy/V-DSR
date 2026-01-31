@@ -34,9 +34,25 @@ def _resolve_paths(start_dir: str):
     return os.path.abspath(start_dir), os.path.abspath(start_dir)
 
 
+def _resolve_utils_path(start_dir: str) -> str:
+    cur = os.path.abspath(_normalize_dir(start_dir))
+    for _ in range(8):
+        cand_src = os.path.join(cur, "src", "model", "qwen-vl-utils", "src")
+        cand_model = os.path.join(cur, "model", "qwen-vl-utils", "src")
+        if os.path.isdir(cand_src):
+            return cand_src
+        if os.path.isdir(cand_model):
+            return cand_model
+        cur = os.path.dirname(cur)
+    return ""
+
+
 PROJECT_ROOT, FINETUNE_ROOT = _resolve_paths(os.path.dirname(__file__))
+UTILS_ROOT = _resolve_utils_path(os.path.dirname(__file__))
 sys.path.insert(0, PROJECT_ROOT)
 sys.path.insert(0, FINETUNE_ROOT)
+if UTILS_ROOT:
+    sys.path.insert(0, UTILS_ROOT)
 
 
 def load_spatial_model(model_path, device_map="auto", torch_dtype="auto"):

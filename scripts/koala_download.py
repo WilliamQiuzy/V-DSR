@@ -44,6 +44,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timestamp_field", default="")
     parser.add_argument("--start_field", default="")
     parser.add_argument("--end_field", default="")
+    parser.add_argument("--hf_token", default="",
+                        help="HuggingFace token (or set HF_TOKEN env var)")
+    parser.add_argument("--proxy", default="",
+                        help="Proxy for yt-dlp (default: reads from https_proxy/http_proxy/ALL_PROXY env var)")
+    parser.add_argument("--cookies", default="",
+                        help="Path to cookies.txt (Netscape format) for YouTube sign-in")
+    parser.add_argument("--cookies_from_browser", default="",
+                        help="Browser to extract cookies from, e.g. chrome, firefox, edge")
     return parser.parse_args()
 
 
@@ -99,25 +107,32 @@ def _get_start_end(sample: Dict[str, Any], args: argparse.Namespace) -> Tuple[Op
     return _parse_timestamp(sample.get("timestamp"))
 
 
-def _download_clip(url: str, start: float, end: float, out_path: str, yt_dlp: str) -> bool:
+def _download_clip(url: str, start: float, end: float, out_path: str,
+                   yt_dlp: str, proxy: str = "", cookies: str = "",
+                   cookies_from_browser: str = "") -> bool:
     if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
         return True
     out_dir = os.path.dirname(out_path)
     os.makedirs(out_dir, exist_ok=True)
     cmd = [
         yt_dlp,
+        "--no-check-certificates",
         "--no-playlist",
-        "-f",
-        "mp4",
-        "--merge-output-format",
-        "mp4",
+        "-f", "bv*[ext=mp4]/bv*/b",
+        "--recode-video", "mp4",
         "--download-sections",
         f"*{start}-{end}",
         "--force-keyframes-at-cuts",
         "-o",
         out_path,
-        url,
     ]
+    if proxy:
+        cmd += ["--proxy", proxy]
+    if cookies:
+        cmd += ["--cookies", cookies]
+    if cookies_from_browser:
+        cmd += ["--cookies-from-browser", cookies_from_browser]
+    cmd.append(url)
     result = subprocess.run(cmd)
     return result.returncode == 0 and os.path.exists(out_path)
 
@@ -136,7 +151,23 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    ds = load_dataset(args.dataset, split=args.split, streaming=True)
+    # Auto-detect proxy from environment if not explicitly provided
+    if not args.proxy:
+        args.proxy = (os.environ.get("https_proxy")
+                      or os.environ.get("HTTPS_PROXY")
+                      or os.environ.get("http_proxy")
+                      or os.environ.get("HTTP_PROXY")
+                      or os.environ.get("ALL_PROXY")
+                      or "")
+    if args.proxy:
+        print(f"Using proxy: {args.proxy}")
+
+    hf_token = args.hf_token or os.environ.get("HF_TOKEN")
+    if not hf_token:
+        print("Warning: No HF token provided. Set --hf_token or HF_TOKEN env var "
+              "if the dataset requires authentication.", file=sys.stderr)
+    ds = load_dataset(args.dataset, split=args.split, streaming=True,
+                      token=hf_token if hf_token else None)
     it = iter(ds)
     first = next(it)
     id_field = args.id_field or _guess_field(first, ["videoID", "video_id", "id"])
@@ -192,7 +223,8 @@ def main() -> int:
 
             ok = True
             if not args.skip_download:
-                ok = _download_clip(url, start_s, end_s, out_path, args.yt_dlp)
+                ok = _download_clip(url, start_s, end_s, out_path, args.yt_dlp,
+                                    args.proxy, args.cookies, args.cookies_from_browser)
             if ok:
                 writer.writerow(
                     {

@@ -17,8 +17,10 @@ def rotate_half(x):
     return torch.cat((-x2, x1), dim=-1)
 
 def obtain_rotary_pos_id_vision(grid_thw, second_per_grid_ts, spatial_merge_size):
-    if isinstance(second_per_grid_ts,torch.Tensor) == False:
-        second_per_grid_ts = torch.Tensor(second_per_grid_ts).to(device=grid_thw.device)
+    if isinstance(second_per_grid_ts, torch.Tensor) is False:
+        second_per_grid_ts = torch.tensor(second_per_grid_ts, device=grid_thw.device)
+    elif second_per_grid_ts.device != grid_thw.device:
+        second_per_grid_ts = second_per_grid_ts.to(grid_thw.device)
     position_ids = []
     for i in range(grid_thw.shape[0]):
         t, h, w = grid_thw[i]
@@ -29,7 +31,7 @@ def obtain_rotary_pos_id_vision(grid_thw, second_per_grid_ts, spatial_merge_size
         )
         range_tensor = torch.arange(llm_grid_t).view(-1, 1)
         expanded_range = range_tensor.expand(-1, llm_grid_h * llm_grid_w)
-        expanded_range = expanded_range.to(second_per_grid_ts.device,second_per_grid_ts.dtype)
+        expanded_range = expanded_range.to(grid_thw.device, second_per_grid_ts.dtype)
         second_per_grid_t = second_per_grid_ts[i]
         time_tensor = expanded_range * second_per_grid_t * 2
 

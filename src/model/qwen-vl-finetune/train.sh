@@ -31,7 +31,7 @@ torchrun --nproc_per_node=$NPROC_PER_NODE \
          --tune_mm_llm True \
          --tune_mm_vision False \
          --tune_mm_mlp True \
-         --pi3_path PATH_TO_Pi3 \
+         --pi3_path /home/data/vdsr/model.safetensor \
          --dataset_use $DATASETS \
          --output_dir $OUTPUT_DIR \
          --cache_dir $CACHE_DIR \

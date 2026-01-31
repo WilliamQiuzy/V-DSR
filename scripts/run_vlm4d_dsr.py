@@ -83,6 +83,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--torch_dtype", default="auto")
     parser.add_argument("--prompt_mode", choices=["cot", "direct"], default="cot",
                         help="Prompt style: cot (chain-of-thought) or direct")
+    parser.add_argument("--no_packed_preprocess", action="store_true",
+                        help="Disable Scheme B packed preprocessing (+32 video_pad tokens).")
     return parser.parse_args()
 
 
@@ -238,6 +240,7 @@ def main() -> int:
                 max_frames=args.max_frames,
                 max_new_tokens=args.max_new_tokens,
                 temperature=args.temperature,
+                use_packed_preprocess=not args.no_packed_preprocess,
             )
 
         # Preserve all original fields + add response

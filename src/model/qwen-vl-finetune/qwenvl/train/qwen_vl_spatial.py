@@ -497,9 +497,15 @@ class Qwen2_5_VLForConditionalGeneration_Spatial(Qwen2_5_VLForConditionalGenerat
                 n_video_tokens = (input_ids == self.config.video_token_id).sum().item()
                 n_video_features = video_embeds.shape[0]
                 if n_video_tokens != n_video_features:
-                    raise ValueError(
-                        f"Video features and video tokens do not match: tokens: {n_video_tokens}, features {n_video_features}"
-                    )
+                    # In some inference pipelines, extra 32 geometry tokens are appended
+                    # to video features without adding extra video tokens. Trim them.
+                    if n_video_features == n_video_tokens + 32:
+                        video_embeds = video_embeds[:n_video_tokens]
+                        n_video_features = n_video_tokens
+                    else:
+                        raise ValueError(
+                            f"Video features and video tokens do not match: tokens: {n_video_tokens}, features {n_video_features}"
+                        )
 
                 mask = input_ids == self.config.video_token_id
                 mask_unsqueezed = mask.unsqueeze(-1)

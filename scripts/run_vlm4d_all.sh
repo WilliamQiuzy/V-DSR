@@ -28,11 +28,7 @@ fi
 
 # GPU IDs to use (override with GPU_IDS="0,1,2,3")
 if [[ -z "${GPU_IDS:-}" ]]; then
-  if [[ "$NUM_GPUS" -gt 0 ]]; then
-    GPU_IDS="$(seq -s, 0 $((NUM_GPUS-1)))"
-  else
-    GPU_IDS="0"
-  fi
+  GPU_IDS="0,1,2,3"
 fi
 IFS=',' read -r -a GPU_ARRAY <<< "$GPU_IDS"
 NUM_GPUS="${#GPU_ARRAY[@]}"
@@ -41,7 +37,7 @@ VLM4D_DIR="${VLM4D_DIR:-VLM4D}"
 
 # ====== Helpers ======
 get_total() {
-  python - <<PY
+  python - "$1" <<'PY'
 import json, sys
 p=sys.argv[1]
 with open(p,"r") as f:

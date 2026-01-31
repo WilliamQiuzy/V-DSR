@@ -5,6 +5,7 @@ on external benchmarks (VLM4D, 4D-Bench, etc.).
 
 import os
 import sys
+import copy
 import torch
 import numpy as np
 
@@ -68,6 +69,63 @@ def load_spatial_model(model_path, device_map="auto", torch_dtype="auto"):
     return model, processor
 
 
+def _build_packed_input_ids(tokenizer, prompt_text, grid_thw_video_merged):
+    """Build input_ids with expanded <|video_pad|> tokens (+32) like training."""
+    tokenizer = copy.deepcopy(tokenizer)
+    tokenizer.chat_template = (
+        "{% for message in messages %}{{'<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>' + '\\n'}}"
+        "{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}{% endif %}"
+    )
+    system_message = "You are a helpful assistant."
+
+    if "<video>" not in prompt_text:
+        content = "<video>\n" + prompt_text
+    else:
+        content = prompt_text
+
+    if isinstance(grid_thw_video_merged, (list, tuple)):
+        grid_tokens = int(grid_thw_video_merged[0])
+    else:
+        grid_tokens = int(grid_thw_video_merged)
+
+    replacement = (
+        "<|vision_start|>"
+        + "<|video_pad|>" * (grid_tokens + 32)
+        + "<|vision_end|>"
+    )
+    parts = content.split("<video>")
+    if len(parts) == 1:
+        content = replacement + content
+    else:
+        rebuilt = []
+        for i in range(len(parts) - 1):
+            rebuilt.append(parts[i])
+            rebuilt.append(replacement)
+        rebuilt.append(parts[-1])
+        content = "".join(rebuilt)
+
+    messages = [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": content},
+    ]
+    try:
+        input_ids = tokenizer.apply_chat_template(
+            messages, tokenize=True, add_generation_prompt=True
+        )
+    except TypeError:
+        text = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        input_ids = tokenizer(text).input_ids
+    if isinstance(input_ids, torch.Tensor):
+        if input_ids.dim() == 1:
+            input_ids = input_ids.unsqueeze(0)
+    else:
+        input_ids = torch.tensor([input_ids], dtype=torch.long)
+    attention_mask = torch.ones_like(input_ids, dtype=torch.long)
+    return input_ids, attention_mask
+
+
 def sample_video_frames(video_path, num_frames=32):
     """
     Uniformly sample frames from a video file.
@@ -107,7 +165,7 @@ def sample_video_frames(video_path, num_frames=32):
 
 
 def infer_video_qa(model, processor, video_path, prompt_text, max_frames=32,
-                   max_new_tokens=512, temperature=0.01):
+                   max_new_tokens=512, temperature=0.01, use_packed_preprocess=True):
     """
     Run single-sample video QA inference.
 
@@ -138,21 +196,64 @@ def infer_video_qa(model, processor, video_path, prompt_text, max_frames=32,
         }
     ]
 
-    # Apply chat template
-    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
-    # Process inputs
     from qwen_vl_utils import process_vision_info
-    image_inputs, video_inputs = process_vision_info(messages)
-
-    inputs = processor(
-        text=[text],
-        images=image_inputs,
-        videos=video_inputs,
-        padding=True,
-        return_tensors="pt",
+    image_inputs, video_inputs, video_kwargs = process_vision_info(
+        messages, return_video_kwargs=True
     )
-    inputs = inputs.to(model.device)
+
+    if use_packed_preprocess:
+        # Process video to get pixel_values_videos + grid_thw
+        image_processor = getattr(processor, "image_processor", processor)
+        video_processed = image_processor.preprocess(
+            images=None, videos=video_inputs, return_tensors="pt"
+        )
+        pixel_values_videos = video_processed["pixel_values_videos"]
+        video_grid_thw = video_processed["video_grid_thw"]
+        merge_size = getattr(image_processor, "merge_size", 2)
+        grid_thw_video_merged = int(
+            video_grid_thw[0].prod().item() // (merge_size ** 2)
+        )
+
+        tokenizer = getattr(processor, "tokenizer", processor)
+        input_ids, attention_mask = _build_packed_input_ids(
+            tokenizer, prompt_text, grid_thw_video_merged
+        )
+
+        # second_per_grid_ts follows training: temporal_patch_size / fps
+        second_per_grid_ts = None
+        fps_list = video_kwargs.get("fps") if isinstance(video_kwargs, dict) else None
+        if fps_list:
+            temporal_patch = getattr(image_processor, "temporal_patch_size", 2)
+            if fps_list[0] and fps_list[0] > 0:
+                second_per_grid_ts = torch.tensor(
+                    [temporal_patch / float(fps_list[0])], dtype=torch.float32
+                )
+
+        inputs = {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "pixel_values_videos": pixel_values_videos,
+            "video_grid_thw": video_grid_thw,
+        }
+        if second_per_grid_ts is not None:
+            inputs["second_per_grid_ts"] = second_per_grid_ts
+    else:
+        # Apply chat template and rely on HF processor expansion (no +32 pads)
+        text = processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = processor(
+            text=[text],
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+        )
+
+    inputs = {
+        k: (v.to(model.device) if torch.is_tensor(v) else v)
+        for k, v in inputs.items()
+    }
 
     with torch.no_grad():
         generated_ids = model.generate(
@@ -164,9 +265,10 @@ def infer_video_qa(model, processor, video_path, prompt_text, max_frames=32,
         )
 
     # Decode only the generated part
+    input_ids = inputs["input_ids"] if isinstance(inputs, dict) else inputs.input_ids
     generated_ids_trimmed = [
         out_ids[len(in_ids):]
-        for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+        for in_ids, out_ids in zip(input_ids, generated_ids)
     ]
     output_text = processor.batch_decode(
         generated_ids_trimmed,

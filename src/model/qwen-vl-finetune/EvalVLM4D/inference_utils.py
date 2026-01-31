@@ -266,10 +266,13 @@ def infer_video_qa(model, processor, video_path, prompt_text, max_frames=32,
             return_tensors="pt",
         )
 
-    inputs = {
-        k: (v.to(model.device) if torch.is_tensor(v) else v)
-        for k, v in inputs.items()
-    }
+    device = next(model.parameters()).device
+    inputs = {k: (v.to(device) if torch.is_tensor(v) else v) for k, v in inputs.items()}
+    if "second_per_grid_ts" in inputs and "video_grid_thw" in inputs:
+        if torch.is_tensor(inputs["second_per_grid_ts"]):
+            inputs["second_per_grid_ts"] = inputs["second_per_grid_ts"].to(
+                inputs["video_grid_thw"].device
+            )
 
     with torch.no_grad():
         generated_ids = model.generate(

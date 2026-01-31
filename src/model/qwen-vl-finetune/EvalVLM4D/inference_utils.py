@@ -9,8 +9,31 @@ import torch
 import numpy as np
 
 # Add project root and model training paths so we can import the spatial model class
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FINETUNE_ROOT = os.path.join(PROJECT_ROOT, "src", "model", "qwen-vl-finetune")
+def _normalize_dir(val) -> str:
+    if isinstance(val, (tuple, list)):
+        for item in val:
+            try:
+                return os.fspath(item)
+            except TypeError:
+                continue
+        return str(val)
+    return os.fspath(val)
+
+
+def _resolve_paths(start_dir: str):
+    cur = os.path.abspath(_normalize_dir(start_dir))
+    for _ in range(8):
+        cand_src = os.path.join(cur, "src", "model", "qwen-vl-finetune")
+        cand_model = os.path.join(cur, "model", "qwen-vl-finetune")
+        if os.path.isdir(cand_src):
+            return cur, cand_src
+        if os.path.isdir(cand_model):
+            return cur, cand_model
+        cur = os.path.dirname(cur)
+    return os.path.abspath(start_dir), os.path.abspath(start_dir)
+
+
+PROJECT_ROOT, FINETUNE_ROOT = _resolve_paths(os.path.dirname(__file__))
 sys.path.insert(0, PROJECT_ROOT)
 sys.path.insert(0, FINETUNE_ROOT)
 

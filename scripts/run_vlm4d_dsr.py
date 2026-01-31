@@ -36,9 +36,26 @@ import sys
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts"))
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "src", "model", "qwen-vl-finetune"))
+
+def _find_eval_utils(start_dir: str) -> Optional[str]:
+    cur = os.path.abspath(start_dir)
+    for _ in range(8):
+        cand_src = os.path.join(cur, "src", "model", "qwen-vl-finetune", "EvalVLM4D")
+        cand_model = os.path.join(cur, "model", "qwen-vl-finetune", "EvalVLM4D")
+        if os.path.isdir(cand_src):
+            return cand_src
+        if os.path.isdir(cand_model):
+            return cand_model
+        cur = os.path.dirname(cur)
+    return None
+
+
+EVAL_UTILS_DIR = _find_eval_utils(os.path.dirname(__file__))
+if EVAL_UTILS_DIR:
+    sys.path.insert(0, EVAL_UTILS_DIR)
+else:
+    # fallback: allow local import if inference_utils is next to this file
+    sys.path.insert(0, os.path.dirname(__file__))
 
 from inference_utils import load_spatial_model, infer_video_qa
 

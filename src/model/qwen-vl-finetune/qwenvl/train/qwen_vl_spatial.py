@@ -470,6 +470,7 @@ class Qwen2_5_VLForConditionalGeneration_Spatial(Qwen2_5_VLForConditionalGenerat
                 for val in non_text_tokens:
                     mask_id &= (text_id_tmp != val)
                 text_length.append(sum(mask_id))
+                mask_id = mask_id.to(inputs_embeds.device)
                 text_embeds.append(inputs_embeds[0,attention_mask_visual[i]:attention_mask_visual[i+1]][mask_id])
             text_embeds = torch.cat(text_embeds,dim=0)
             if pixel_values is not None:

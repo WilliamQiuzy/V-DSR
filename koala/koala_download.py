@@ -44,14 +44,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timestamp_field", default="")
     parser.add_argument("--start_field", default="")
     parser.add_argument("--end_field", default="")
-    parser.add_argument("--hf_token", default="",
+    parser.add_argument("--hf_token", default="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",
                         help="HuggingFace token (or set HF_TOKEN env var)")
     parser.add_argument("--proxy", default="",
                         help="Proxy for yt-dlp (default: reads from https_proxy/http_proxy/ALL_PROXY env var)")
-    parser.add_argument("--cookies", default="",
+    parser.add_argument("--cookies", default="./www.youtube.com_cookies.txt",
                         help="Path to cookies.txt (Netscape format) for YouTube sign-in")
     parser.add_argument("--cookies_from_browser", default="",
                         help="Browser to extract cookies from, e.g. chrome, firefox, edge")
+    parser.add_argument("--filter_ids", default="",
+                        help="Path to a parquet/csv/json file with a 'videoID' column. "
+                             "Only download clips whose videoID appears in this file.")
+    parser.add_argument("--resume", action="store_true",
+                        help="Append to existing CSV instead of overwriting, "
+                             "and skip videoIDs already recorded in it.")
     return parser.parse_args()
 
 
@@ -162,6 +168,35 @@ def main() -> int:
     if args.proxy:
         print(f"Using proxy: {args.proxy}")
 
+    # ---- Load filter set from DSR-Train (or any file with videoID column) ----
+    filter_ids: set = set()
+    if args.filter_ids:
+        fpath = args.filter_ids
+        if fpath.endswith(".parquet"):
+            import pandas as pd
+            filter_ids = set(pd.read_parquet(fpath)["videoID"].unique())
+        elif fpath.endswith(".csv"):
+            import pandas as pd
+            filter_ids = set(pd.read_csv(fpath)["videoID"].unique())
+        elif fpath.endswith(".json"):
+            import json as _json
+            with open(fpath) as _f:
+                _data = _json.load(_f)
+            filter_ids = set(item["videoID"] for item in _data)
+        else:
+            print(f"Unsupported filter file format: {fpath}", file=sys.stderr)
+            return 1
+        print(f"Filter: will only download {len(filter_ids)} videoIDs from {fpath}")
+
+    # ---- Resume mode: read already-downloaded IDs from existing CSV ----
+    done_ids: set = set()
+    if args.resume and os.path.exists(args.csv_out):
+        with open(args.csv_out, "r", encoding="utf-8") as f_existing:
+            reader = csv.DictReader(f_existing)
+            for row in reader:
+                done_ids.add(row["videoID"])
+        print(f"Resume: skipping {len(done_ids)} already-recorded videoIDs")
+
     hf_token = args.hf_token or os.environ.get("HF_TOKEN")
     if not hf_token:
         print("Warning: No HF token provided. Set --hf_token or HF_TOKEN env var "
@@ -193,11 +228,14 @@ def main() -> int:
         "out_path",
     ]
 
-    with open(args.csv_out, "w", newline="", encoding="utf-8") as f:
+    csv_mode = "a" if (args.resume and os.path.exists(args.csv_out)) else "w"
+    with open(args.csv_out, csv_mode, newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
+        if csv_mode == "w":
+            writer.writeheader()
 
         count = 0
+        skipped = 0
         def iter_all():
             yield first
             for item in it:
@@ -210,6 +248,16 @@ def main() -> int:
                 break
 
             video_id = str(sample.get(id_field))
+
+            # Skip if not in the filter set (e.g. DSR-Train videoIDs)
+            if filter_ids and video_id not in filter_ids:
+                continue
+
+            # Skip if already downloaded in a previous run
+            if video_id in done_ids:
+                skipped += 1
+                continue
+
             caption = str(sample.get(caption_field))
             url = str(sample.get(url_field))
             start_s, end_s = _get_start_end(sample, args)
@@ -238,12 +286,22 @@ def main() -> int:
                     }
                 )
                 count += 1
+                done_ids.add(video_id)
                 f.flush()
+
+                # Progress for filtered downloads
+                if filter_ids:
+                    remaining = len(filter_ids) - len(done_ids)
+                    print(f"[{count}] Downloaded {video_id} "
+                          f"({len(done_ids)}/{len(filter_ids)}, {remaining} remaining)")
+
             if args.sleep > 0:
                 time.sleep(args.sleep)
 
     print(f"Saved CSV: {args.csv_out}")
-    print(f"Downloaded clips: {count}")
+    print(f"Downloaded clips: {count}  (skipped already-done: {skipped})")
+    if filter_ids:
+        print(f"Coverage: {len(done_ids)}/{len(filter_ids)} target videoIDs")
     return 0
 
 

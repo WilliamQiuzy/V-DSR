@@ -241,9 +241,7 @@ def infer_video_qa(model, processor, video_path, prompt_text, max_frames=32,
         if fps_list:
             temporal_patch = getattr(image_processor, "temporal_patch_size", 2)
             if fps_list[0] and fps_list[0] > 0:
-                second_per_grid_ts = torch.tensor(
-                    [temporal_patch / float(fps_list[0])], dtype=torch.float32
-                )
+                second_per_grid_ts = [temporal_patch / float(fps_list[0])]
 
         inputs = {
             "input_ids": input_ids,

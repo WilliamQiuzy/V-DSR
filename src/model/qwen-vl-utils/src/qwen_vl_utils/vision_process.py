@@ -181,8 +181,16 @@ def smart_nframes(
             logger.warning(f"smart_nframes: nframes[{nframes}] > total_frames[{total_frames}]")
         nframes = min(min(max(nframes, min_frames), max_frames), total_frames)
         nframes = floor_by_factor(nframes, FRAME_FACTOR)
-    if not (FRAME_FACTOR <= nframes and nframes <= total_frames):
-        raise ValueError(f"nframes should in interval [{FRAME_FACTOR}, {total_frames}], but got {nframes}.")
+    min_allowed = min(FRAME_FACTOR, total_frames)
+    if nframes < min_allowed:
+        raise ValueError(f"nframes should be >= {min_allowed}, but got {nframes}.")
+    if nframes > total_frames:
+        logger.warning(
+            "smart_nframes: nframes[%s] > total_frames[%s]; "
+            "video will be padded by repeating frames to reach nframes.",
+            nframes,
+            total_frames,
+        )
     return nframes
 
 

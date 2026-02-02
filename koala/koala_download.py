@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timestamp_field", default="")
     parser.add_argument("--start_field", default="")
     parser.add_argument("--end_field", default="")
-    parser.add_argument("--hf_token", default="",
+    parser.add_argument("--hf_token", default="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",
                         help="HuggingFace token (or set HF_TOKEN env var)")
     parser.add_argument("--proxy", default="",
                         help="Proxy for yt-dlp (default: reads from https_proxy/http_proxy/ALL_PROXY env var)")
@@ -58,6 +58,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resume", action="store_true",
                         help="Append to existing CSV instead of overwriting, "
                              "and skip videoIDs already recorded in it.")
+    parser.add_argument("--local_metadata", default="",
+                        help="Path to a local parquet/csv with Koala-36M metadata "
+                             "(videoID, url, timestamp, caption). "
+                             "Skips HuggingFace streaming entirely.")
     return parser.parse_args()
 
 
@@ -124,6 +128,7 @@ def _download_clip(url: str, start: float, end: float, out_path: str,
         yt_dlp,
         "--no-check-certificates",
         "--no-playlist",
+        "--remote-components", "ejs:github",
         "-f", "bv*[ext=mp4]/bv*/b",
         "--recode-video", "mp4",
         "--download-sections",
@@ -149,13 +154,6 @@ def main() -> int:
     if csv_dir:
         os.makedirs(csv_dir, exist_ok=True)
     os.makedirs(args.out_dir, exist_ok=True)
-
-    try:
-        from datasets import load_dataset
-    except Exception as exc:
-        print("Missing dependency: datasets. Install with `pip install datasets`.", file=sys.stderr)
-        print(str(exc), file=sys.stderr)
-        return 1
 
     # Auto-detect proxy from environment if not explicitly provided
     if not args.proxy:
@@ -197,18 +195,54 @@ def main() -> int:
                 done_ids.add(row["videoID"])
         print(f"Resume: skipping {len(done_ids)} already-recorded videoIDs")
 
-    hf_token = args.hf_token or os.environ.get("HF_TOKEN")
-    if not hf_token:
-        print("Warning: No HF token provided. Set --hf_token or HF_TOKEN env var "
-              "if the dataset requires authentication.", file=sys.stderr)
-    ds = load_dataset(args.dataset, split=args.split, streaming=True,
-                      token=hf_token if hf_token else None)
-    it = iter(ds)
-    first = next(it)
-    id_field = args.id_field or _guess_field(first, ["videoID", "video_id", "id"])
-    caption_field = args.caption_field or _guess_field(first, ["caption", "text", "description"])
-    url_field = args.url_field or _guess_field(first, ["url", "video_url", "youtube_url"])
-    timestamp_field = args.timestamp_field or _guess_field(first, ["timestamp", "timestamps"])
+    # ---- Load metadata: local parquet OR HuggingFace streaming ----
+    if args.local_metadata:
+        import pandas as pd
+        meta_path = args.local_metadata
+        if meta_path.endswith(".parquet"):
+            df_meta = pd.read_parquet(meta_path)
+        elif meta_path.endswith(".csv"):
+            df_meta = pd.read_csv(meta_path)
+        else:
+            print(f"Unsupported local_metadata format: {meta_path}", file=sys.stderr)
+            return 1
+        samples = df_meta.to_dict(orient="records")
+        print(f"Loaded {len(samples)} rows from local metadata: {meta_path}")
+
+        first = samples[0]
+        id_field = args.id_field or _guess_field(first, ["videoID", "video_id", "id"])
+        caption_field = args.caption_field or _guess_field(first, ["caption", "text", "description"])
+        url_field = args.url_field or _guess_field(first, ["url", "video_url", "youtube_url"])
+        timestamp_field = args.timestamp_field or _guess_field(first, ["timestamp", "timestamps"])
+
+        def iter_all():
+            for row in samples:
+                yield row
+    else:
+        try:
+            from datasets import load_dataset
+        except Exception as exc:
+            print("Missing dependency: datasets. Install with `pip install datasets`.", file=sys.stderr)
+            print(str(exc), file=sys.stderr)
+            return 1
+
+        hf_token = args.hf_token or os.environ.get("HF_TOKEN")
+        if not hf_token:
+            print("Warning: No HF token provided. Set --hf_token or HF_TOKEN env var "
+                  "if the dataset requires authentication.", file=sys.stderr)
+        ds = load_dataset(args.dataset, split=args.split, streaming=True,
+                          token=hf_token if hf_token else None)
+        it = iter(ds)
+        first = next(it)
+        id_field = args.id_field or _guess_field(first, ["videoID", "video_id", "id"])
+        caption_field = args.caption_field or _guess_field(first, ["caption", "text", "description"])
+        url_field = args.url_field or _guess_field(first, ["url", "video_url", "youtube_url"])
+        timestamp_field = args.timestamp_field or _guess_field(first, ["timestamp", "timestamps"])
+
+        def iter_all():
+            yield first
+            for item in it:
+                yield item
 
     if not id_field or not caption_field or not url_field:
         print("Failed to infer required fields. Provide --id_field/--caption_field/--url_field.", file=sys.stderr)
@@ -236,10 +270,6 @@ def main() -> int:
 
         count = 0
         skipped = 0
-        def iter_all():
-            yield first
-            for item in it:
-                yield item
 
         for idx, sample in enumerate(iter_all()):
             if idx < args.start_index:

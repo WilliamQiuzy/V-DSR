@@ -1,6 +1,5 @@
 # === Secrets & Credentials ===
-*_cookies.txt
-cookies.txt
+*cookies*.txt
 .env
 .env.*
 *.pem

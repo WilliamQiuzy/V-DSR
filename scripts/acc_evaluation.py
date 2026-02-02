@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import openai
 from tqdm import tqdm
+import httpx
 
 from openai import AsyncAzureOpenAI, OpenAIError, AsyncOpenAI
 from utils.eval_utils import get_acc_async
@@ -30,6 +31,17 @@ async def main():
     )
     args = parser.parse_args()
 
+    def _build_deepseek_http_client():
+        proxy = os.getenv("DEEPSEEK_PROXY")
+        ca_bundle = os.getenv("DEEPSEEK_CA_BUNDLE")
+        insecure = os.getenv("DEEPSEEK_INSECURE", "").lower() in ("1", "true", "yes")
+        timeout = float(os.getenv("DEEPSEEK_TIMEOUT", "30.0"))
+        verify = False if insecure else (ca_bundle if ca_bundle else True)
+        kwargs = {"verify": verify, "timeout": timeout}
+        if proxy:
+            kwargs["proxies"] = proxy
+        return httpx.AsyncClient(**kwargs)
+
     subdir = os.path.basename(args.output_dir)
     os.makedirs(os.path.join(args.eval_dir, subdir), exist_ok=True)
 
@@ -40,60 +52,69 @@ async def main():
         log_file.write(f"\nEvaluating output directory: {args.output_dir}\n")
         log_file.write("=" * 50 + "\n")  # Separator for clarity
 
-        for output_file in os.listdir(args.output_dir):
-            print('Now testing:', output_file)
-            if not output_file.endswith(".json"):
-                continue
+        http_client = None
+        provider = args.provider.lower()
+        try:
+            if provider == "deepseek":
+                http_client = _build_deepseek_http_client()
 
-            examples_path = os.path.join(args.output_dir, output_file)
-            examples = json.load(open(examples_path))
-            
-            eval_file = os.path.join(args.eval_dir, subdir, output_file)
-            
-            # Skip if it's already evaluated
-            if os.path.exists(eval_file):
-                eval_results = json.load(open(eval_file))
-                if (len(eval_results) == len(examples)
-                    and eval_results and eval_results[0]["response"] == examples[0]["response"]):
-                    print(f"Skipping {output_file}")
+            for output_file in os.listdir(args.output_dir):
+                print('Now testing:', output_file)
+                if not output_file.endswith(".json"):
                     continue
-            
-            client = None
-            provider = args.provider.lower()
-            if provider == "azure":
-                client = AsyncAzureOpenAI(
-                    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-                    api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
-                    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-                )
-            elif provider == "deepseek":
-                client = AsyncOpenAI(
-                    api_key=os.getenv("DEEPSEEK_API_KEY"),
-                    base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
-                )
-            else:
-                client = AsyncOpenAI(
-                    api_key=os.getenv("OPENAI_API_KEY"),
-                )
 
-            model_name = args.model
-            if not model_name:
-                if provider == "deepseek":
-                    model_name = "deepseek-reasoner"
+                examples_path = os.path.join(args.output_dir, output_file)
+                examples = json.load(open(examples_path))
+
+                eval_file = os.path.join(args.eval_dir, subdir, output_file)
+
+                # Skip if it's already evaluated
+                if os.path.exists(eval_file):
+                    eval_results = json.load(open(eval_file))
+                    if (len(eval_results) == len(examples)
+                        and eval_results and eval_results[0]["response"] == examples[0]["response"]):
+                        print(f"Skipping {output_file}")
+                        continue
+
+                client = None
+                if provider == "azure":
+                    client = AsyncAzureOpenAI(
+                        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+                        api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+                        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+                    )
+                elif provider == "deepseek":
+                    client = AsyncOpenAI(
+                        api_key=os.getenv("DEEPSEEK_API_KEY"),
+                        base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+                        http_client=http_client,
+                    )
                 else:
-                    model_name = "o4-mini"
+                    client = AsyncOpenAI(
+                        api_key=os.getenv("OPENAI_API_KEY"),
+                    )
 
-            accuracy, outputs = await get_acc_async(
-                examples,
-                client,
-                engine_name=model_name,
-                provider=provider,
-            )
-            json.dump(outputs, open(eval_file, "w"), indent=4, ensure_ascii=False)
-            
-            log_entry = f"Accuracy of {output_file}: {accuracy}\n"
-            log_file.write(log_entry)  # Write accuracy to log file
-            print(log_entry.strip())  # Print the result
+                model_name = args.model
+                if not model_name:
+                    if provider == "deepseek":
+                        model_name = "deepseek-reasoner"
+                    else:
+                        model_name = "o4-mini"
+
+                accuracy, outputs = await get_acc_async(
+                    examples,
+                    client,
+                    engine_name=model_name,
+                    provider=provider,
+                )
+                json.dump(outputs, open(eval_file, "w"), indent=4, ensure_ascii=False)
+
+                log_entry = f"Accuracy of {output_file}: {accuracy}\n"
+                log_file.write(log_entry)  # Write accuracy to log file
+                print(log_entry.strip())  # Print the result
+        finally:
+            if http_client is not None:
+                await http_client.aclose()
 
 if __name__ == "__main__":
     asyncio.run(main())

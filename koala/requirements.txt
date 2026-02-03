@@ -1,0 +1,26 @@
+# Koala video download dependencies
+# Install order matters: pyarrow must be installed before pandas/datasets
+#
+# Step 1: Core dependencies (install first)
+pyarrow==17.0.0
+numpy==1.26.4
+
+# Step 2: Data processing
+pandas==1.3.5
+requests==2.32.5
+
+# Step 3: HuggingFace datasets (optional, for --use_datasets mode)
+datasets==2.21.0
+
+# Step 4: Video download
+# NOTE: yt-dlp requires Python 3.10+ for full YouTube SABR support.
+# On Python 3.9, install via pipx instead:
+#   pipx install yt-dlp
+# This gives you ~/.local/bin/yt-dlp (use --yt_dlp ~/.local/bin/yt-dlp)
+#
+# If on Python 3.10+, uncomment:
+# yt-dlp>=2026.1.31
+
+# Step 5: System dependencies (install via brew, not pip)
+# brew install ffmpeg    # required for --download-sections (video clipping)
+# brew install tmux      # optional, for long-running downloads

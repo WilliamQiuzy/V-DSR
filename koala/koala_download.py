@@ -10,9 +10,9 @@ Extra columns are included for traceability (url, start, end, duration_sec, out_
 
 usage:
 pip install datasets yt-dlp
-python scripts/koala_download.py
-    --out_dir data/koala36m/videos \
-    --csv_out data/koala36m/koala_videos.csv
+python koala/koala_download.py
+    --out_dir koala/videos \
+    --csv_out koala/koala_videos.csv
 """
 
 import argparse
@@ -29,8 +29,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default="Koala-36M/Koala-36M-v1")
     parser.add_argument("--split", default="train")
-    parser.add_argument("--out_dir", default="data/koala36m/videos")
-    parser.add_argument("--csv_out", default="data/koala36m/koala_videos.csv")
+    parser.add_argument("--out_dir", default="koala/videos")
+    parser.add_argument("--csv_out", default="koala/koala_videos.csv")
     parser.add_argument("--max_samples", type=int, default=0)
     parser.add_argument("--start_index", type=int, default=0)
     parser.add_argument("--min_duration", type=float, default=20.0)
@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
                         help="HuggingFace token (or set HF_TOKEN env var)")
     parser.add_argument("--proxy", default="",
                         help="Proxy for yt-dlp (default: reads from https_proxy/http_proxy/ALL_PROXY env var)")
-    parser.add_argument("--cookies", default="./www.youtube.com_cookies.txt",
+    parser.add_argument("--cookies", default="koala/www.youtube.com_cookies.txt",
                         help="Path to cookies.txt (Netscape format) for YouTube sign-in")
     parser.add_argument("--cookies_from_browser", default="",
                         help="Browser to extract cookies from, e.g. chrome, firefox, edge")
@@ -128,7 +128,6 @@ def _download_clip(url: str, start: float, end: float, out_path: str,
         yt_dlp,
         "--no-check-certificates",
         "--no-playlist",
-        "--remote-components", "ejs:github",
         "-f", "bv*[ext=mp4]/bv*/b",
         "--recode-video", "mp4",
         "--download-sections",
@@ -292,12 +291,34 @@ def main() -> int:
             url = str(sample.get(url_field))
             start_s, end_s = _get_start_end(sample, args)
             if start_s is None or end_s is None:
+                print(f"[SKIP] {video_id}: missing timestamp, skipping")
                 continue
             duration = end_s - start_s
             if duration < args.min_duration or duration > args.max_duration:
                 continue
 
             out_path = os.path.join(args.out_dir, f"{video_id}.mp4")
+
+            # Skip if the clip file already exists on disk
+            if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                print(f"[SKIP] {video_id}: already downloaded, skipping")
+                skipped += 1
+                # Still record it in the CSV if not already there
+                if video_id not in done_ids:
+                    writer.writerow(
+                        {
+                            "videoID": video_id,
+                            "caption": caption,
+                            "url": url,
+                            "start": start_s,
+                            "end": end_s,
+                            "duration_sec": duration,
+                            "out_path": out_path,
+                        }
+                    )
+                    done_ids.add(video_id)
+                    f.flush()
+                continue
 
             ok = True
             if not args.skip_download:

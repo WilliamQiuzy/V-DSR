@@ -39,7 +39,12 @@ async def main():
         verify = False if insecure else (ca_bundle if ca_bundle else True)
         kwargs = {"verify": verify, "timeout": timeout}
         if proxy:
-            kwargs["proxies"] = proxy
+            try:
+                return httpx.AsyncClient(proxies=proxy, **kwargs)
+            except TypeError as exc:
+                if "proxies" in str(exc):
+                    return httpx.AsyncClient(proxy=proxy, **kwargs)
+                raise
         return httpx.AsyncClient(**kwargs)
 
     subdir = os.path.basename(args.output_dir)
@@ -48,7 +53,7 @@ async def main():
     log_path = os.path.join(args.eval_dir, args.log_file)
 
     # Open log file in append mode and record output_dir at the beginning
-    with open(log_path, "a") as log_file:
+    with open(log_path, "a", encoding="utf-8") as log_file:
         log_file.write(f"\nEvaluating output directory: {args.output_dir}\n")
         log_file.write("=" * 50 + "\n")  # Separator for clarity
 
@@ -64,13 +69,15 @@ async def main():
                     continue
 
                 examples_path = os.path.join(args.output_dir, output_file)
-                examples = json.load(open(examples_path))
+                with open(examples_path, "r", encoding="utf-8") as f:
+                    examples = json.load(f)
 
                 eval_file = os.path.join(args.eval_dir, subdir, output_file)
 
                 # Skip if it's already evaluated
                 if os.path.exists(eval_file):
-                    eval_results = json.load(open(eval_file))
+                    with open(eval_file, "r", encoding="utf-8") as f:
+                        eval_results = json.load(f)
                     if (len(eval_results) == len(examples)
                         and eval_results and eval_results[0]["response"] == examples[0]["response"]):
                         print(f"Skipping {output_file}")
@@ -107,7 +114,8 @@ async def main():
                     engine_name=model_name,
                     provider=provider,
                 )
-                json.dump(outputs, open(eval_file, "w"), indent=4, ensure_ascii=False)
+                with open(eval_file, "w", encoding="utf-8") as f:
+                    json.dump(outputs, f, indent=4, ensure_ascii=False)
 
                 log_entry = f"Accuracy of {output_file}: {accuracy}\n"
                 log_file.write(log_entry)  # Write accuracy to log file

@@ -13,6 +13,9 @@ koala/videos/
 *.mov
 *.mkv
 *.parquet
+!koala/dsr_train_qa_pairs.parquet
+!koala/koala_dsr_metadata.parquet
+!koala/dsr_video_index.parquet
 
 # === Python ===
 __pycache__/

@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timestamp_field", default="")
     parser.add_argument("--start_field", default="")
     parser.add_argument("--end_field", default="")
-    parser.add_argument("--hf_token", default="",
+    parser.add_argument("--hf_token", default="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",
                         help="HuggingFace token (or set HF_TOKEN env var)")
     parser.add_argument("--proxy", default="",
                         help="Proxy for yt-dlp (default: reads from https_proxy/http_proxy/ALL_PROXY env var)")
@@ -186,13 +186,19 @@ def main() -> int:
         print(f"Filter: will only download {len(filter_ids)} videoIDs from {fpath}")
 
     # ---- Resume mode: read already-downloaded IDs from existing CSV ----
+    # Only count a videoID as "done" if the file actually exists on disk.
     done_ids: set = set()
     if args.resume and os.path.exists(args.csv_out):
+        csv_total = 0
         with open(args.csv_out, "r", encoding="utf-8") as f_existing:
             reader = csv.DictReader(f_existing)
             for row in reader:
-                done_ids.add(row["videoID"])
-        print(f"Resume: skipping {len(done_ids)} already-recorded videoIDs")
+                csv_total += 1
+                out = row.get("out_path", "")
+                if out and os.path.exists(out) and os.path.getsize(out) > 0:
+                    done_ids.add(row["videoID"])
+        print(f"Resume: {len(done_ids)} videoIDs with files on disk "
+              f"(out of {csv_total} in CSV)")
 
     # ---- Load metadata: local parquet OR HuggingFace streaming ----
     if args.local_metadata:

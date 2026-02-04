@@ -31,8 +31,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split", default="train")
     parser.add_argument("--out_dir", default="koala/videos")
     parser.add_argument("--csv_out", default="koala/koala_videos.csv")
-    parser.add_argument("--max_samples", type=int, default=0)
-    parser.add_argument("--start_index", type=int, default=0)
+    parser.add_argument("--max_samples", type=int, default=0,
+                        help="Maximum number of videos to download (0 = no limit)")
+    parser.add_argument("--start_index", type=int, default=0,
+                        help="Start downloading from this index in the dataset (0-based). "
+                             "Example: --start_index 5000 starts from the 5001st video")
     parser.add_argument("--min_duration", type=float, default=20.0)
     parser.add_argument("--max_duration", type=float, default=120.0)
     parser.add_argument("--skip_download", action="store_true")
@@ -48,7 +51,7 @@ def parse_args() -> argparse.Namespace:
                         help="HuggingFace token (or set HF_TOKEN env var)")
     parser.add_argument("--proxy", default="",
                         help="Proxy for yt-dlp (default: reads from https_proxy/http_proxy/ALL_PROXY env var)")
-    parser.add_argument("--cookies", default="koala/www.youtube.com_cookies.txt",
+    parser.add_argument("--cookies", default="",
                         help="Path to cookies.txt (Netscape format) for YouTube sign-in")
     parser.add_argument("--cookies_from_browser", default="",
                         help="Browser to extract cookies from, e.g. chrome, firefox, edge")
@@ -62,6 +65,8 @@ def parse_args() -> argparse.Namespace:
                         help="Path to a local parquet/csv with Koala-36M metadata "
                              "(videoID, url, timestamp, caption). "
                              "Skips HuggingFace streaming entirely.")
+    parser.add_argument("--failed_log", default="koala/failed_videos.txt",
+                        help="Path to log file for permanently failed videos (to skip on resume)")
     return parser.parse_args()
 
 
@@ -119,8 +124,9 @@ def _get_start_end(sample: Dict[str, Any], args: argparse.Namespace) -> Tuple[Op
 
 def _download_clip(url: str, start: float, end: float, out_path: str,
                    yt_dlp: str, proxy: str = "", cookies: str = "",
-                   cookies_from_browser: str = "") -> bool:
-    if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                   cookies_from_browser: str = "", video_id: str = "",
+                   failed_log_path: str = "") -> bool:
+    if os.path.exists(out_path) and os.path.getsize(out_path) > 10000:
         return True
     out_dir = os.path.dirname(out_path)
     os.makedirs(out_dir, exist_ok=True)
@@ -133,6 +139,7 @@ def _download_clip(url: str, start: float, end: float, out_path: str,
         "--download-sections",
         f"*{start}-{end}",
         "--force-keyframes-at-cuts",
+        "--no-continue",  # Don't resume partial downloads to avoid corruption
         "-o",
         out_path,
     ]
@@ -143,8 +150,51 @@ def _download_clip(url: str, start: float, end: float, out_path: str,
     if cookies_from_browser:
         cmd += ["--cookies-from-browser", cookies_from_browser]
     cmd.append(url)
-    result = subprocess.run(cmd)
-    return result.returncode == 0 and os.path.exists(out_path)
+
+    # Run with timeout and capture output
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+
+        # Check for specific error messages indicating permanent failure
+        if result.returncode != 0:
+            error_output = result.stderr + result.stdout
+            # Permanent failure indicators (video itself is unavailable)
+            # Note: "Sign in to confirm" and "HTTP Error 403" are cookies/auth issues, not permanent
+            permanent_errors = [
+                "Video unavailable",
+                "Private video",
+                "This video has been removed",
+                "This video is no longer available",
+                "HTTP Error 404",
+                "Members-only content",
+            ]
+            # Check for temporary failures (auth/cookies issues)
+            temp_errors = ["Sign in to confirm", "HTTP Error 403"]
+            for err_msg in temp_errors:
+                if err_msg in error_output:
+                    print(f"  🔄 临时失败-需要更新cookies ({err_msg}): {url}")
+                    return False
+
+            # Check for permanent failures (video unavailable)
+            for err_msg in permanent_errors:
+                if err_msg in error_output:
+                    print(f"  ⚠️  永久失败 ({err_msg}): {url}")
+                    # Log to blacklist
+                    if video_id and failed_log_path:
+                        try:
+                            with open(failed_log_path, "a", encoding="utf-8") as f_failed:
+                                f_failed.write(f"{video_id}\n")
+                        except Exception:
+                            pass
+                    return False
+
+        return result.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 10000
+    except subprocess.TimeoutExpired:
+        print(f"  ⏱️  下载超时: {url}")
+        return False
+    except Exception as e:
+        print(f"  ❌ 下载异常: {e}")
+        return False
 
 
 def main() -> int:
@@ -195,10 +245,20 @@ def main() -> int:
             for row in reader:
                 csv_total += 1
                 out = row.get("out_path", "")
-                if out and os.path.exists(out) and os.path.getsize(out) > 0:
+                if out and os.path.exists(out) and os.path.getsize(out) > 10000:
                     done_ids.add(row["videoID"])
         print(f"Resume: {len(done_ids)} videoIDs with files on disk "
               f"(out of {csv_total} in CSV)")
+
+    # ---- Load failed videos blacklist ----
+    failed_ids: set = set()
+    if os.path.exists(args.failed_log):
+        with open(args.failed_log, "r", encoding="utf-8") as f_failed:
+            for line in f_failed:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    failed_ids.add(line)
+        print(f"Blacklist: {len(failed_ids)} permanently failed videoIDs loaded")
 
     # ---- Load metadata: local parquet OR HuggingFace streaming ----
     if args.local_metadata:
@@ -276,9 +336,16 @@ def main() -> int:
         count = 0
         skipped = 0
 
+        if args.start_index > 0:
+            print(f"\n⏩ 跳过前 {args.start_index} 个视频，从第 {args.start_index + 1} 个开始下载...")
+
         for idx, sample in enumerate(iter_all()):
             if idx < args.start_index:
                 continue
+
+            # Show progress at start_index
+            if idx == args.start_index and args.start_index > 0:
+                print(f"✅ 已到达起始位置 (索引 {args.start_index})，开始下载...\n")
             if args.max_samples and count >= args.max_samples:
                 break
 
@@ -290,6 +357,11 @@ def main() -> int:
 
             # Skip if already downloaded in a previous run
             if video_id in done_ids:
+                skipped += 1
+                continue
+
+            # Skip if previously failed permanently
+            if video_id in failed_ids:
                 skipped += 1
                 continue
 
@@ -306,7 +378,7 @@ def main() -> int:
             out_path = os.path.join(args.out_dir, f"{video_id}.mp4")
 
             # Skip if the clip file already exists on disk
-            if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+            if os.path.exists(out_path) and os.path.getsize(out_path) > 10000:
                 print(f"[SKIP] {video_id}: already downloaded, skipping")
                 skipped += 1
                 # Still record it in the CSV if not already there
@@ -329,7 +401,8 @@ def main() -> int:
             ok = True
             if not args.skip_download:
                 ok = _download_clip(url, start_s, end_s, out_path, args.yt_dlp,
-                                    args.proxy, args.cookies, args.cookies_from_browser)
+                                    args.proxy, args.cookies, args.cookies_from_browser,
+                                    video_id, args.failed_log)
             if ok:
                 writer.writerow(
                     {

@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timestamp_field", default="")
     parser.add_argument("--start_field", default="")
     parser.add_argument("--end_field", default="")
-    parser.add_argument("--hf_token", default="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",
+    parser.add_argument("--hf_token", default="",
                         help="HuggingFace token (or set HF_TOKEN env var)")
     parser.add_argument("--proxy", default="",
                         help="Proxy for yt-dlp (default: reads from https_proxy/http_proxy/ALL_PROXY env var)")

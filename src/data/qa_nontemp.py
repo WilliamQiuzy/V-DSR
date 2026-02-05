@@ -1,5 +1,7 @@
 from template import *
 import os
+import sys
+import types
 import random
 import numpy as np
 from qa_utils import *
@@ -20,9 +22,9 @@ import warnings
 import multiprocessing
 import torch.multiprocessing as mp
 import requests
-from pi3.utils.basic import load_images_as_tensor, write_ply
+from pi3.utils.basic import load_multimodal_data
 from pi3.utils.geometry import depth_edge
-from pi3.models.pi3 import Pi3
+from pi3.models.pi3x import Pi3X
 import glob
 import math
 
@@ -38,26 +40,98 @@ def parse_arg():
     
     return args
 
-def run_pi3(model, proc_id, device):
-    imgs = load_images_as_tensor(f"./{proc_id}_frames_nontemp/", interval=1).to(device) # (N, 3, H, W)
-    h,w,c = cv2.imread(f"./{proc_id}_frames_nontemp/000.jpg").shape
-    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+VDA_INPUT_SIZE = 518
+VDA_ENCODER = "vitl"
+VDA_METRIC = False
+
+def _import_vda():
+    vda_root = Path(__file__).resolve().parent / "Video-Depth-Anything"
+    original_sys_path = list(sys.path)
+    original_utils = sys.modules.get("utils")
+    try:
+        sys.path.insert(0, str(vda_root))
+        vda_utils = types.ModuleType("utils")
+        vda_utils.__path__ = [str(vda_root / "utils")]
+        sys.modules["utils"] = vda_utils
+        from video_depth_anything.video_depth import VideoDepthAnything
+        return VideoDepthAnything, vda_root
+    finally:
+        sys.path = original_sys_path
+        if original_utils is not None:
+            sys.modules["utils"] = original_utils
+        else:
+            sys.modules.pop("utils", None)
+
+def build_vda_model(device):
+    VideoDepthAnything, vda_root = _import_vda()
+    model_configs = {
+        "vits": {"encoder": "vits", "features": 64, "out_channels": [48, 96, 192, 384]},
+        "vitb": {"encoder": "vitb", "features": 128, "out_channels": [96, 192, 384, 768]},
+        "vitl": {"encoder": "vitl", "features": 256, "out_channels": [256, 512, 1024, 1024]},
+    }
+    checkpoint_name = "metric_video_depth_anything" if VDA_METRIC else "video_depth_anything"
+    checkpoint_path = vda_root / "checkpoints" / f"{checkpoint_name}_{VDA_ENCODER}.pth"
+    model = VideoDepthAnything(**model_configs[VDA_ENCODER], metric=VDA_METRIC)
+    model.load_state_dict(torch.load(str(checkpoint_path), map_location="cpu"), strict=True)
+    return model.to(device).eval()
+
+def _load_rgb_frames(frame_dir):
+    frame_paths = sorted(glob.glob(os.path.join(frame_dir, "*.jpg")))
+    if not frame_paths:
+        raise FileNotFoundError(f"no frames found in {frame_dir}")
+    frames = []
+    for frame_path in frame_paths:
+        frame_bgr = cv2.imread(frame_path)
+        if frame_bgr is None:
+            raise RuntimeError(f"failed to read frame {frame_path}")
+        frames.append(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
+    if not frames:
+        raise RuntimeError(f"failed to load frames from {frame_dir}")
+    return np.stack(frames, axis=0)
+
+def run_pi3x_with_vda(pi3x_model, vda_model, proc_id, device):
+    frame_dir = f"./{proc_id}_frames_nontemp"
+    if device.type == "cuda":
+        torch.cuda.set_device(device)
+    frames = _load_rgb_frames(frame_dir)
+    h, w = frames[0].shape[:2]
+    device_type = device.type
+    use_fp32 = device_type != "cuda"
+    depths, _ = vda_model.infer_video_depth(
+        frames,
+        target_fps=1,
+        input_size=VDA_INPUT_SIZE,
+        device=device_type,
+        fp32=use_fp32,
+    )
+    imgs, cond = load_multimodal_data(
+        frame_dir,
+        conditions={"depths": depths},
+        interval=1,
+        device=device,
+    )
+    depths_tensor = cond["depths"]
+    if depths_tensor is None:
+        raise RuntimeError("VDA depths are required for Pi3X")
+    mask_add_depth = torch.ones((1, imgs.shape[1]), dtype=torch.bool, device=device)
+    dtype = torch.bfloat16 if device_type == "cuda" and torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     with torch.no_grad():
-        with torch.amp.autocast('cuda', dtype=dtype):
-            res = model(imgs[None]) # Add batch dimension
-
-    masks = torch.sigmoid(res['conf'][..., 0]) > 0.1
-    non_edge = ~depth_edge(res['local_points'][..., 2], rtol=0.03)
-    masks = torch.logical_and(masks, non_edge)[0]
-    masks = masks.float()
-    local_points = res['local_points'][0].permute(0,3,1,2)
-    local_points = F.interpolate(local_points,(h,w))
+        with torch.amp.autocast(device_type=device_type, dtype=dtype, enabled=(device_type == "cuda")):
+            res = pi3x_model(
+                imgs,
+                depths=depths_tensor,
+                mask_add_depth=mask_add_depth,
+                with_prior=True,
+            )
+    masks = torch.sigmoid(res["conf"][..., 0]) > 0.1
+    non_edge = ~depth_edge(res["local_points"][..., 2], rtol=0.03)
+    masks = torch.logical_and(masks, non_edge)[0].float()
+    local_points = res["local_points"][0].permute(0, 3, 1, 2)
+    local_points = F.interpolate(local_points, (h, w))
     local_points = local_points.cpu().numpy()
-    camera_pose = res['camera_poses'][0].cpu().numpy()
-    masks = F.interpolate(masks.unsqueeze(0),(h,w))[0]
-    masks = masks.round().to(torch.bool)
-    masks = masks.cpu().numpy()
-
+    camera_pose = res["camera_poses"][0].cpu().numpy()
+    masks = F.interpolate(masks.unsqueeze(0), (h, w))[0]
+    masks = masks.round().to(torch.bool).cpu().numpy()
     return local_points, masks, camera_pose
 
 def generate_one_video(proc_id, timestamps, agents, objs, points, masks, poses, grounding_model, video_predictor, sam2_predictor, val_preprocess, dino, device):
@@ -241,7 +315,8 @@ def generate_multi_videos(physical_gpu_id, proc_id, part_info, qa_num, step_size
     dino.load_state_dict(torch.load("./models/croplargeEX2/dino_weight.pt", map_location='cpu'))
     dino = dino.to(device)
     print('weight loaded')
-    pi3 = Pi3.from_pretrained("./models/Pi3").to(device).eval()
+    vda_model = build_vda_model(device)
+    pi3x = Pi3X.from_pretrained("./models/Pi3X").to(device).eval()
     val_preprocess   = AutoImageProcessor.from_pretrained(DINO_LARGE, cache_dir='./')
     save_files = glob.glob(f"qa_pairs_nontemp_{proc_id}_*.json")
     if os.path.exists(f"qa_pairs_nontemp_{proc_id}.json"):
@@ -275,7 +350,7 @@ def generate_multi_videos(physical_gpu_id, proc_id, part_info, qa_num, step_size
         else:
             obj = obj.lower()
             obj = obj.split('.')
-        points, masks, poses = run_pi3(pi3, proc_id, device)
+        points, masks, poses = run_pi3x_with_vda(pi3x, vda_model, proc_id, device)
         trial_num = 0
         while trial_num<qa_num:
             qa_type, agent, time_s, time_e, obj_coords = generate_one_video(proc_id, timestamps, agents, obj, points, masks, poses, grounding_model, video_predictor, sam2_predictor, val_preprocess, dino, device)

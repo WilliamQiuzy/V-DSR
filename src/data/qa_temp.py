@@ -1,12 +1,25 @@
 from template import *
 import os
+import sys
+import types
+# 禁用输出缓冲，确保 print 立即显示
+sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
 import random
 import numpy as np
+
+# 固定随机种子，确保结果可复现
+RANDOM_SEED = 42
+random.seed(RANDOM_SEED)
+np.random.seed(RANDOM_SEED)
+
 from qa_utils import *
 import cv2
 import json
 import cv2
 import torch
+torch.manual_seed(RANDOM_SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(RANDOM_SEED)
 import supervision as sv
 from pathlib import Path
 from tqdm import tqdm
@@ -19,9 +32,9 @@ import pandas as pd
 import warnings
 import multiprocessing
 import torch.multiprocessing as mp
-from pi3.utils.basic import load_images_as_tensor, write_ply
+from pi3.utils.basic import load_multimodal_data
 from pi3.utils.geometry import depth_edge
-from pi3.models.pi3 import Pi3
+from pi3.models.pi3x import Pi3X
 import glob
 import torch.nn.functional as F
 import math
@@ -48,26 +61,98 @@ def prob_cal(static):
         prob[item] = 1/((static[item]+1)/total_num)
     return prob
 
-def run_pi3(model, proc_id, device):
-    imgs = load_images_as_tensor(f"./{proc_id}_frames/", interval=1).to(device) # (N, 3, H, W)
-    h,w,c = cv2.imread(f"./{proc_id}_frames/000.jpg").shape
-    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+VDA_INPUT_SIZE = 518
+VDA_ENCODER = "vitl"
+VDA_METRIC = False
+
+def _import_vda():
+    vda_root = Path(__file__).resolve().parent / "Video-Depth-Anything"
+    original_sys_path = list(sys.path)
+    original_utils = sys.modules.get("utils")
+    try:
+        sys.path.insert(0, str(vda_root))
+        vda_utils = types.ModuleType("utils")
+        vda_utils.__path__ = [str(vda_root / "utils")]
+        sys.modules["utils"] = vda_utils
+        from video_depth_anything.video_depth import VideoDepthAnything
+        return VideoDepthAnything, vda_root
+    finally:
+        sys.path = original_sys_path
+        if original_utils is not None:
+            sys.modules["utils"] = original_utils
+        else:
+            sys.modules.pop("utils", None)
+
+def build_vda_model(device):
+    VideoDepthAnything, vda_root = _import_vda()
+    model_configs = {
+        "vits": {"encoder": "vits", "features": 64, "out_channels": [48, 96, 192, 384]},
+        "vitb": {"encoder": "vitb", "features": 128, "out_channels": [96, 192, 384, 768]},
+        "vitl": {"encoder": "vitl", "features": 256, "out_channels": [256, 512, 1024, 1024]},
+    }
+    checkpoint_name = "metric_video_depth_anything" if VDA_METRIC else "video_depth_anything"
+    checkpoint_path = vda_root / "checkpoints" / f"{checkpoint_name}_{VDA_ENCODER}.pth"
+    model = VideoDepthAnything(**model_configs[VDA_ENCODER], metric=VDA_METRIC)
+    model.load_state_dict(torch.load(str(checkpoint_path), map_location="cpu"), strict=True)
+    return model.to(device).eval()
+
+def _load_rgb_frames(frame_dir):
+    frame_paths = sorted(glob.glob(os.path.join(frame_dir, "*.jpg")))
+    if not frame_paths:
+        raise FileNotFoundError(f"no frames found in {frame_dir}")
+    frames = []
+    for frame_path in frame_paths:
+        frame_bgr = cv2.imread(frame_path)
+        if frame_bgr is None:
+            raise RuntimeError(f"failed to read frame {frame_path}")
+        frames.append(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
+    if not frames:
+        raise RuntimeError(f"failed to load frames from {frame_dir}")
+    return np.stack(frames, axis=0), frame_paths
+
+def run_pi3x_with_vda(pi3x_model, vda_model, proc_id, device):
+    frame_dir = f"./{proc_id}_frames"
+    if device.type == "cuda":
+        torch.cuda.set_device(device)
+    frames, _ = _load_rgb_frames(frame_dir)
+    h, w = frames[0].shape[:2]
+    device_type = device.type
+    use_fp32 = device_type != "cuda"
+    depths, _ = vda_model.infer_video_depth(
+        frames,
+        target_fps=1,
+        input_size=VDA_INPUT_SIZE,
+        device=device_type,
+        fp32=use_fp32,
+    )
+    imgs, cond = load_multimodal_data(
+        frame_dir,
+        conditions={"depths": depths},
+        interval=1,
+        device=device,
+    )
+    depths_tensor = cond["depths"]
+    if depths_tensor is None:
+        raise RuntimeError("VDA depths are required for Pi3X")
+    mask_add_depth = torch.ones((1, imgs.shape[1]), dtype=torch.bool, device=device)
+    dtype = torch.bfloat16 if device_type == "cuda" and torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     with torch.no_grad():
-        with torch.amp.autocast('cuda', dtype=dtype):
-            res = model(imgs[None]) # Add batch dimension
-
-    masks = torch.sigmoid(res['conf'][..., 0]) > 0.1
-    non_edge = ~depth_edge(res['local_points'][..., 2], rtol=0.03)
-    masks = torch.logical_and(masks, non_edge)[0]
-    masks = masks.float()
-    local_points = res['local_points'][0].permute(0,3,1,2)
-    local_points = F.interpolate(local_points,(h,w))
+        with torch.amp.autocast(device_type=device_type, dtype=dtype, enabled=(device_type == "cuda")):
+            res = pi3x_model(
+                imgs,
+                depths=depths_tensor,
+                mask_add_depth=mask_add_depth,
+                with_prior=True,
+            )
+    masks = torch.sigmoid(res["conf"][..., 0]) > 0.1
+    non_edge = ~depth_edge(res["local_points"][..., 2], rtol=0.03)
+    masks = torch.logical_and(masks, non_edge)[0].float()
+    local_points = res["local_points"][0].permute(0, 3, 1, 2)
+    local_points = F.interpolate(local_points, (h, w))
     local_points = local_points.cpu().numpy()
-    camera_pose = res['camera_poses'][0].cpu().numpy()
-    masks = F.interpolate(masks.unsqueeze(0),(h,w))[0]
-    masks = masks.round().to(torch.bool)
-    masks = masks.cpu().numpy()
-
+    camera_pose = res["camera_poses"][0].cpu().numpy()
+    masks = F.interpolate(masks.unsqueeze(0), (h, w))[0]
+    masks = masks.round().to(torch.bool).cpu().numpy()
     return local_points, masks, camera_pose
 
 def generate_one_video(proc_id, timestamps, agents, objs, qa_num, points, masks, poses, grounding_model, video_predictor, sam2_predictor, val_preprocess, dino, device):
@@ -83,6 +168,7 @@ def generate_one_video(proc_id, timestamps, agents, objs, qa_num, points, masks,
     qa_count = {}
     for q_type in question_type:
         qa_count[q_type]=0
+    print(f"\n{'='*50}\n开始生成QA (目标: {qa_num})\n{'='*50}")
     for qa_idx in range(qa_num):
        try:
         success = True
@@ -107,9 +193,11 @@ def generate_one_video(proc_id, timestamps, agents, objs, qa_num, points, masks,
             if agent != "camera":
                 agent_label, agent_box, agent_mask = extract_obj_image_mask(grounding_model, sam2_predictor, f"./{proc_id}_frames/{idx_1:03d}.jpg", ". ".join(agents)+".", device)
                 if np.sum(np.logical_and(agent_mask,masks[idx_1]))==0:
+                    print(f"[SKIP] qa_type={qa_type}: agent_mask与depth_mask无重叠")
                     continue
                 agent_ori = extract_orient(dino, val_preprocess, f"./{proc_id}_frames/{idx_1:03d}.jpg", agent_mask, device)
                 if agent_ori[3]<0.6:
+                    print(f"[SKIP] qa_type={qa_type}: agent方向置信度过低 ({agent_ori[3]:.2f} < 0.6)")
                     continue
             video_frames = [f"./{proc_id}_frames/{idx:03d}.jpg" for idx in range(idx_2, idx_3+1)]
             if "dir" in qa_type:
@@ -179,6 +267,7 @@ def generate_one_video(proc_id, timestamps, agents, objs, qa_num, points, masks,
                 object_2 = "camera" if objects[1]=="camera" else f"{obj_labels[1]} with initial bounding box coordinates [{obj_boxes[1][0]},{obj_boxes[1][1]},{obj_boxes[1][2]},{obj_boxes[1][3]}]"
                 idx = idx-1 if success == False else idx
                 if len_answer>15 or (idx-idx_2+1)<4:
+                    print(f"[SKIP] qa_type={qa_type}: 答案太长({len_answer}>15)或时间段太短({idx-idx_2+1}<4)")
                     continue
                 time_end = timestamps[idx]
                 question = template[qa_type].format(time_2,time_end,agent,time_1,object_1,object_2)
@@ -252,6 +341,7 @@ def generate_one_video(proc_id, timestamps, agents, objs, qa_num, points, masks,
                 object_2 = "camera" if objects[1]=="camera" else f"{obj_labels[1]} with initial bounding box coordinates [{obj_boxes[1][0]},{obj_boxes[1][1]},{obj_boxes[1][2]},{obj_boxes[1][3]}]"
                 idx = idx-1 if success == False else idx
                 if len_answer>15 or (idx-idx_2+1)<4:
+                    print(f"[SKIP] qa_type={qa_type}: 答案太长({len_answer}>15)或时间段太短({idx-idx_2+1}<4)")
                     continue
                 time_end = timestamps[idx]
                 question = template[qa_type].format(time_2,time_end,agent,time_1,object_1,object_2)
@@ -1166,9 +1256,15 @@ def generate_one_video(proc_id, timestamps, agents, objs, qa_num, points, masks,
             qa_pairs.append({"Type":qa_type, "Question":question, options[0]:wrong[0], options[1]:wrong[1], options[2]:wrong[2], c_option:answer, "Correct":c_option})
         qa_count[qa_type] += 1
        except RuntimeWarning as rw:
-        print(f"runtimewarning: {rw}")
+        print(f"[SKIP] RuntimeWarning: {rw}")
        except Exception as e:
-        pass
+        import traceback
+        print(f"[ERROR] Exception in qa_type={qa_type}: {e}")
+        traceback.print_exc()
+    print(f"\n{'='*50}")
+    print(f"QA生成完成: 成功 {len(qa_pairs)}/{qa_num}")
+    print(f"各类型统计: {qa_count}")
+    print(f"{'='*50}\n")
     return qa_pairs
 
 def generate_multi_videos(physical_gpu_id, part_info, video_dynamic, qa_num, step_size, save_idx):
@@ -1207,7 +1303,8 @@ def generate_multi_videos(physical_gpu_id, part_info, video_dynamic, qa_num, ste
     dino = dino.to(device)
     print('weight loaded')
     val_preprocess = AutoImageProcessor.from_pretrained(DINO_LARGE, cache_dir='./')
-    pi3 = Pi3.from_pretrained("./models/Pi3").to(device).eval()
+    vda_model = build_vda_model(device)
+    pi3x = Pi3X.from_pretrained("./models/Pi3X").to(device).eval()
     save_files = glob.glob(f"qa_pairs_{save_idx}_*.json")
     if os.path.exists(f"qa_pairs_{save_idx}.json"):
         return
@@ -1239,7 +1336,7 @@ def generate_multi_videos(physical_gpu_id, part_info, video_dynamic, qa_num, ste
         else:
             obj = obj.lower()
             obj = obj.split('.')
-        points, masks, poses = run_pi3(pi3, save_idx, device)
+        points, masks, poses = run_pi3x_with_vda(pi3x, vda_model, save_idx, device)
         qa_pairs = generate_one_video(save_idx, timestamps, agent, obj, qa_num, points, masks, poses, grounding_model, video_predictor, sam2_predictor, val_preprocess, dino, device)
         qa_total[video_name]=qa_pairs
     with open(f'qa_pairs_{save_idx}.json', 'w') as json_file:

@@ -1,6 +1,7 @@
 from template import *
 import os
 import sys
+import shutil
 import subprocess
 # 禁用输出缓冲，确保 print 立即显示
 sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
@@ -66,7 +67,11 @@ VDA_ENCODER = "vitl"
 VDA_METRIC = False
 VDA_PYTHON = os.environ.get("VDA_PYTHON", "/root/.conda/envs/vda/bin/python")
 VDA_WORKER = Path(__file__).resolve().parent / "Video-Depth-Anything" / "run_vda_worker.py"
-VDA_CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "vda_cache"
+VDA_CACHE_DIR = Path(os.environ.get("VDA_CACHE_DIR", "/home/data/vdsr/DSR_Suite/data/vda_cache"))
+VDA_DEVICE = os.environ.get("VDA_DEVICE", "cuda").lower()
+VDA_GPU = os.environ.get("VDA_GPU")
+VDA_AUTO_GPU = os.environ.get("VDA_AUTO_GPU", "1") != "0"
+VDA_MIN_FREE_GB = float(os.environ.get("VDA_MIN_FREE_GB", "1"))
 
 def _vda_cache_path(video_name):
     safe_name = video_name.replace("/", "_")
@@ -75,7 +80,9 @@ def _vda_cache_path(video_name):
 
 def _ensure_vda_depths(frame_dir, cache_path, device):
     if cache_path.exists():
+        print(f"[VDA] cache_path exists, skip worker: {cache_path}", file=sys.stderr)
         return
+    print(f"[VDA] cache_path missing, run worker: {cache_path}", file=sys.stderr)
     if not frame_dir.exists():
         raise FileNotFoundError(f"frames dir not found: {frame_dir}")
     if not os.path.exists(VDA_PYTHON):
@@ -84,7 +91,19 @@ def _ensure_vda_depths(frame_dir, cache_path, device):
         raise FileNotFoundError(f"VDA worker not found: {VDA_WORKER}")
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
-    if device.type == "cuda":
+    if VDA_DEVICE == "cpu":
+        env["CUDA_VISIBLE_DEVICES"] = ""
+    elif VDA_GPU is not None:
+        env["CUDA_VISIBLE_DEVICES"] = VDA_GPU
+    elif VDA_AUTO_GPU:
+        picked = _pick_free_gpu()
+        if picked is not None:
+            env["CUDA_VISIBLE_DEVICES"] = str(picked)
+            print(f"[VDA] auto GPU: {picked}", file=sys.stderr)
+        else:
+            env["CUDA_VISIBLE_DEVICES"] = ""
+            print("[VDA] auto GPU not found, using CPU", file=sys.stderr)
+    elif device.type == "cuda":
         env["CUDA_VISIBLE_DEVICES"] = str(device.index if device.index is not None else 0)
     cmd = [
         VDA_PYTHON,
@@ -100,7 +119,36 @@ def _ensure_vda_depths(frame_dir, cache_path, device):
     ]
     if VDA_METRIC:
         cmd.append("--metric")
+    print(f"[VDA] cache_path: {cache_path}", file=sys.stderr)
+    print(f"[VDA] cmd: {' '.join(cmd)}", file=sys.stderr)
     subprocess.check_call(cmd, env=env)
+
+def _pick_free_gpu():
+    smi = shutil.which("nvidia-smi")
+    if smi is None:
+        return None
+    try:
+        output = subprocess.check_output(
+            [smi, "--query-gpu=memory.free", "--format=csv,nounits,noheader"],
+            text=True,
+        )
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    free_mib = []
+    for line in output.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            free_mib.append(int(line))
+        except ValueError:
+            continue
+    if not free_mib:
+        return None
+    best_idx = int(max(range(len(free_mib)), key=lambda i: free_mib[i]))
+    if free_mib[best_idx] < VDA_MIN_FREE_GB * 1024:
+        return None
+    return best_idx
 
 def run_pi3x_with_vda(pi3x_model, proc_id, video_name, device):
     frame_dir = Path.cwd() / f"{proc_id}_frames"

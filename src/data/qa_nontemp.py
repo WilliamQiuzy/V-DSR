@@ -51,11 +51,44 @@ VDA_DEVICE = os.environ.get("VDA_DEVICE", "cuda").lower()
 VDA_GPU = os.environ.get("VDA_GPU")
 VDA_AUTO_GPU = os.environ.get("VDA_AUTO_GPU", "1") != "0"
 VDA_MIN_FREE_GB = float(os.environ.get("VDA_MIN_FREE_GB", "1"))
+PI3X_AUTO_GPU = os.environ.get("PI3X_AUTO_GPU", "1") != "0"
+PI3X_MIN_FREE_GB = float(os.environ.get("PI3X_MIN_FREE_GB", "1"))
+PI3X_GPU_LIST = os.environ.get("PI3X_GPU_LIST")
 
 def _vda_cache_path(video_name):
     safe_name = video_name.replace("/", "_")
     metric_tag = "metric" if VDA_METRIC else "rel"
     return VDA_CACHE_DIR / f"{safe_name}_{VDA_ENCODER}_{VDA_INPUT_SIZE}_{metric_tag}.npz"
+
+def _parse_visible_gpus():
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible is None:
+        return None
+    visible = visible.strip()
+    if not visible:
+        return []
+    ids = []
+    for item in visible.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if not item.isdigit():
+            return None
+        ids.append(int(item))
+    return ids
+
+def _resolve_global_gpu(device):
+    if device is None or device.type != "cuda":
+        return None
+    idx = 0 if device.index is None else device.index
+    visible = _parse_visible_gpus()
+    if visible is None:
+        return idx
+    if not visible:
+        return None
+    if idx < len(visible):
+        return visible[idx]
+    return idx
 
 def _ensure_vda_depths(frame_dir, cache_path, device):
     if cache_path.exists():
@@ -70,12 +103,16 @@ def _ensure_vda_depths(frame_dir, cache_path, device):
         raise FileNotFoundError(f"VDA worker not found: {VDA_WORKER}")
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
+    main_global_gpu = _resolve_global_gpu(device)
     if VDA_DEVICE == "cpu":
         env["CUDA_VISIBLE_DEVICES"] = ""
     elif VDA_GPU is not None:
         env["CUDA_VISIBLE_DEVICES"] = VDA_GPU
     elif VDA_AUTO_GPU:
-        picked = _pick_free_gpu()
+        exclude = {main_global_gpu} if main_global_gpu is not None else None
+        picked = _pick_free_gpu(exclude=exclude)
+        if picked is None and exclude:
+            picked = _pick_free_gpu()
         if picked is not None:
             env["CUDA_VISIBLE_DEVICES"] = str(picked)
             print(f"[VDA] auto GPU: {picked}", file=sys.stderr)
@@ -83,7 +120,10 @@ def _ensure_vda_depths(frame_dir, cache_path, device):
             env["CUDA_VISIBLE_DEVICES"] = ""
             print("[VDA] auto GPU not found, using CPU", file=sys.stderr)
     elif device.type == "cuda":
-        env["CUDA_VISIBLE_DEVICES"] = str(device.index if device.index is not None else 0)
+        if main_global_gpu is not None:
+            env["CUDA_VISIBLE_DEVICES"] = str(main_global_gpu)
+        else:
+            env["CUDA_VISIBLE_DEVICES"] = ""
     cmd = [
         VDA_PYTHON,
         str(VDA_WORKER),
@@ -102,7 +142,7 @@ def _ensure_vda_depths(frame_dir, cache_path, device):
     print(f"[VDA] cmd: {' '.join(cmd)}", file=sys.stderr)
     subprocess.check_call(cmd, env=env)
 
-def _pick_free_gpu():
+def _pick_free_gpu(exclude=None):
     smi = shutil.which("nvidia-smi")
     if smi is None:
         return None
@@ -124,10 +164,48 @@ def _pick_free_gpu():
             continue
     if not free_mib:
         return None
-    best_idx = int(max(range(len(free_mib)), key=lambda i: free_mib[i]))
+    exclude = set(exclude or [])
+    candidates = [i for i in range(len(free_mib)) if i not in exclude]
+    if not candidates:
+        return None
+    best_idx = int(max(candidates, key=lambda i: free_mib[i]))
     if free_mib[best_idx] < VDA_MIN_FREE_GB * 1024:
         return None
     return best_idx
+
+def _pick_free_gpus(num_needed):
+    if PI3X_GPU_LIST:
+        ids = [int(item) for item in PI3X_GPU_LIST.split(",") if item.strip().isdigit()]
+        if ids:
+            return [ids[i % len(ids)] for i in range(num_needed)]
+    if not PI3X_AUTO_GPU:
+        return [i for i in range(num_needed)]
+    smi = shutil.which("nvidia-smi")
+    if smi is None:
+        return [None for _ in range(num_needed)]
+    try:
+        output = subprocess.check_output(
+            [smi, "--query-gpu=memory.free", "--format=csv,nounits,noheader"],
+            text=True,
+        )
+    except (subprocess.CalledProcessError, OSError):
+        return [None for _ in range(num_needed)]
+    free_mib = []
+    for line in output.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            free_mib.append(int(line))
+        except ValueError:
+            continue
+    if not free_mib:
+        return [None for _ in range(num_needed)]
+    order = sorted(range(len(free_mib)), key=lambda i: free_mib[i], reverse=True)
+    eligible = [i for i in order if free_mib[i] >= PI3X_MIN_FREE_GB * 1024]
+    if not eligible:
+        return [None for _ in range(num_needed)]
+    return [eligible[i % len(eligible)] for i in range(num_needed)]
 
 def run_pi3x_with_vda(pi3x_model, proc_id, video_name, device):
     frame_dir = Path.cwd() / f"{proc_id}_frames_nontemp"
@@ -314,7 +392,11 @@ def generate_one_video(proc_id, timestamps, agents, objs, points, masks, poses, 
         pass
 
 def generate_multi_videos(physical_gpu_id, proc_id, part_info, qa_num, step_size, video_dynamic):
-    device = torch.device(f"cuda:{physical_gpu_id}" if torch.cuda.is_available() else "cpu")
+    if physical_gpu_id is None or not torch.cuda.is_available():
+        device = torch.device("cpu")
+    else:
+        device = torch.device(f"cuda:{physical_gpu_id}")
+        torch.cuda.set_device(device)
 
     GROUNDING_DINO_CONFIG = "grounding_dino/groundingdino/config/GroundingDINO_SwinT_OGC.py"
     GROUNDING_DINO_CHECKPOINT = "./models/groundingdino_swint_ogc.pth"
@@ -456,8 +538,10 @@ data_parts = split_data(meta_info,num_processes)
 mp.set_start_method("spawn", force=True)
 procs = []
 if __name__ == '__main__':
+    gpu_assignments = _pick_free_gpus(num_processes)
+    print(f"[GPU] assignments: {gpu_assignments}", file=sys.stderr)
     for proc_idx in range(num_processes):
-        physical_gpu_id = proc_idx
+        physical_gpu_id = gpu_assignments[proc_idx] if gpu_assignments else None
         p = mp.Process(
         target=generate_multi_videos,
         args=(physical_gpu_id, proc_idx, data_parts[proc_idx], args.qa_num, args.part_len, video_dynamic),

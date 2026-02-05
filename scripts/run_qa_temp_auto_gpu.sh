@@ -51,7 +51,25 @@ fi
 
 export CUDA_VISIBLE_DEVICES="${gpu_ids}"
 export PI3X_AUTO_GPU=0
-export VDA_AUTO_GPU=0
 
 echo "[GPU] CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}" >&2
+vda_gpu=""
+for id in $(
+  printf '%s\n' "${gpu_lines[@]}" \
+    | sort -t, -k2 -nr \
+    | awk -F',' '{gsub(/ /,"",$1); print $1}'
+); do
+  if [[ ",${gpu_ids}," != *",${id},"* ]]; then
+    vda_gpu="${id}"
+    break
+  fi
+done
+if [[ -n "${vda_gpu}" ]]; then
+  export VDA_GPU="${vda_gpu}"
+  export VDA_AUTO_GPU=0
+  echo "[GPU] VDA_GPU=${VDA_GPU}" >&2
+else
+  export VDA_AUTO_GPU=1
+  echo "[GPU] no extra GPU for VDA; fallback to auto/same GPU" >&2
+fi
 exec "${PYTHON_BIN}" "${ROOT_DIR}/src/data/qa_temp.py" "$@"

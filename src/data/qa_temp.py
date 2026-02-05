@@ -1,7 +1,7 @@
 from template import *
 import os
 import sys
-import types
+import subprocess
 # 禁用输出缓冲，确保 print 立即显示
 sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
 import random
@@ -64,69 +64,54 @@ def prob_cal(static):
 VDA_INPUT_SIZE = 518
 VDA_ENCODER = "vitl"
 VDA_METRIC = False
+VDA_PYTHON = os.environ.get("VDA_PYTHON", "/root/.conda/envs/vda/bin/python")
+VDA_WORKER = Path(__file__).resolve().parent / "Video-Depth-Anything" / "run_vda_worker.py"
+VDA_CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "vda_cache"
 
-def _import_vda():
-    vda_root = Path(__file__).resolve().parent / "Video-Depth-Anything"
-    original_sys_path = list(sys.path)
-    original_utils = sys.modules.get("utils")
-    try:
-        sys.path.insert(0, str(vda_root))
-        vda_utils = types.ModuleType("utils")
-        vda_utils.__path__ = [str(vda_root / "utils")]
-        sys.modules["utils"] = vda_utils
-        from video_depth_anything.video_depth import VideoDepthAnything
-        return VideoDepthAnything, vda_root
-    finally:
-        sys.path = original_sys_path
-        if original_utils is not None:
-            sys.modules["utils"] = original_utils
-        else:
-            sys.modules.pop("utils", None)
+def _vda_cache_path(video_name):
+    safe_name = video_name.replace("/", "_")
+    metric_tag = "metric" if VDA_METRIC else "rel"
+    return VDA_CACHE_DIR / f"{safe_name}_{VDA_ENCODER}_{VDA_INPUT_SIZE}_{metric_tag}.npz"
 
-def build_vda_model(device):
-    VideoDepthAnything, vda_root = _import_vda()
-    model_configs = {
-        "vits": {"encoder": "vits", "features": 64, "out_channels": [48, 96, 192, 384]},
-        "vitb": {"encoder": "vitb", "features": 128, "out_channels": [96, 192, 384, 768]},
-        "vitl": {"encoder": "vitl", "features": 256, "out_channels": [256, 512, 1024, 1024]},
-    }
-    checkpoint_name = "metric_video_depth_anything" if VDA_METRIC else "video_depth_anything"
-    checkpoint_path = vda_root / "checkpoints" / f"{checkpoint_name}_{VDA_ENCODER}.pth"
-    model = VideoDepthAnything(**model_configs[VDA_ENCODER], metric=VDA_METRIC)
-    model.load_state_dict(torch.load(str(checkpoint_path), map_location="cpu"), strict=True)
-    return model.to(device).eval()
+def _ensure_vda_depths(frame_dir, cache_path, device):
+    if cache_path.exists():
+        return
+    if not frame_dir.exists():
+        raise FileNotFoundError(f"frames dir not found: {frame_dir}")
+    if not os.path.exists(VDA_PYTHON):
+        raise FileNotFoundError(f"VDA python not found: {VDA_PYTHON}")
+    if not VDA_WORKER.exists():
+        raise FileNotFoundError(f"VDA worker not found: {VDA_WORKER}")
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    if device.type == "cuda":
+        env["CUDA_VISIBLE_DEVICES"] = str(device.index if device.index is not None else 0)
+    cmd = [
+        VDA_PYTHON,
+        str(VDA_WORKER),
+        "--frames_dir",
+        str(frame_dir),
+        "--output_npz",
+        str(cache_path),
+        "--input_size",
+        str(VDA_INPUT_SIZE),
+        "--encoder",
+        VDA_ENCODER,
+    ]
+    if VDA_METRIC:
+        cmd.append("--metric")
+    subprocess.check_call(cmd, env=env)
 
-def _load_rgb_frames(frame_dir):
-    frame_paths = sorted(glob.glob(os.path.join(frame_dir, "*.jpg")))
-    if not frame_paths:
-        raise FileNotFoundError(f"no frames found in {frame_dir}")
-    frames = []
-    for frame_path in frame_paths:
-        frame_bgr = cv2.imread(frame_path)
-        if frame_bgr is None:
-            raise RuntimeError(f"failed to read frame {frame_path}")
-        frames.append(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
-    if not frames:
-        raise RuntimeError(f"failed to load frames from {frame_dir}")
-    return np.stack(frames, axis=0), frame_paths
-
-def run_pi3x_with_vda(pi3x_model, vda_model, proc_id, device):
-    frame_dir = f"./{proc_id}_frames"
+def run_pi3x_with_vda(pi3x_model, proc_id, video_name, device):
+    frame_dir = Path.cwd() / f"{proc_id}_frames"
     if device.type == "cuda":
         torch.cuda.set_device(device)
-    frames, _ = _load_rgb_frames(frame_dir)
-    h, w = frames[0].shape[:2]
-    device_type = device.type
-    use_fp32 = device_type != "cuda"
-    depths, _ = vda_model.infer_video_depth(
-        frames,
-        target_fps=1,
-        input_size=VDA_INPUT_SIZE,
-        device=device_type,
-        fp32=use_fp32,
-    )
+    cache_path = _vda_cache_path(video_name)
+    _ensure_vda_depths(frame_dir, cache_path, device)
+    depths = np.load(cache_path)["depths"]
+    h, w = depths.shape[1:3]
     imgs, cond = load_multimodal_data(
-        frame_dir,
+        str(frame_dir),
         conditions={"depths": depths},
         interval=1,
         device=device,
@@ -135,9 +120,9 @@ def run_pi3x_with_vda(pi3x_model, vda_model, proc_id, device):
     if depths_tensor is None:
         raise RuntimeError("VDA depths are required for Pi3X")
     mask_add_depth = torch.ones((1, imgs.shape[1]), dtype=torch.bool, device=device)
-    dtype = torch.bfloat16 if device_type == "cuda" and torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    dtype = torch.bfloat16 if device.type == "cuda" and torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     with torch.no_grad():
-        with torch.amp.autocast(device_type=device_type, dtype=dtype, enabled=(device_type == "cuda")):
+        with torch.amp.autocast(device_type=device.type, dtype=dtype, enabled=(device.type == "cuda")):
             res = pi3x_model(
                 imgs,
                 depths=depths_tensor,
@@ -1303,7 +1288,6 @@ def generate_multi_videos(physical_gpu_id, part_info, video_dynamic, qa_num, ste
     dino = dino.to(device)
     print('weight loaded')
     val_preprocess = AutoImageProcessor.from_pretrained(DINO_LARGE, cache_dir='./')
-    vda_model = build_vda_model(device)
     pi3x = Pi3X.from_pretrained("./models/Pi3X").to(device).eval()
     save_files = glob.glob(f"qa_pairs_{save_idx}_*.json")
     if os.path.exists(f"qa_pairs_{save_idx}.json"):
@@ -1336,7 +1320,7 @@ def generate_multi_videos(physical_gpu_id, part_info, video_dynamic, qa_num, ste
         else:
             obj = obj.lower()
             obj = obj.split('.')
-        points, masks, poses = run_pi3x_with_vda(pi3x, vda_model, save_idx, device)
+        points, masks, poses = run_pi3x_with_vda(pi3x, save_idx, video_name, device)
         qa_pairs = generate_one_video(save_idx, timestamps, agent, obj, qa_num, points, masks, poses, grounding_model, video_predictor, sam2_predictor, val_preprocess, dino, device)
         qa_total[video_name]=qa_pairs
     with open(f'qa_pairs_{save_idx}.json', 'w') as json_file:

@@ -52,7 +52,7 @@ VDA_GPU = os.environ.get("VDA_GPU")
 VDA_AUTO_GPU = os.environ.get("VDA_AUTO_GPU", "1") != "0"
 VDA_MIN_FREE_GB = float(os.environ.get("VDA_MIN_FREE_GB", "1"))
 PI3X_AUTO_GPU = os.environ.get("PI3X_AUTO_GPU", "1") != "0"
-PI3X_MIN_FREE_GB = float(os.environ.get("PI3X_MIN_FREE_GB", "1"))
+PI3X_MIN_FREE_GB = float(os.environ.get("PI3X_MIN_FREE_GB", "8"))  # 每个进程约需6-9GB
 PI3X_GPU_LIST = os.environ.get("PI3X_GPU_LIST")
 
 def _vda_cache_path(video_name):
@@ -143,6 +143,7 @@ def _ensure_vda_depths(frame_dir, cache_path, device):
     subprocess.check_call(cmd, env=env)
 
 def _pick_free_gpu(exclude=None):
+    """为VDA选择一个空闲GPU，返回物理GPU ID（用于设置CUDA_VISIBLE_DEVICES）"""
     smi = shutil.which("nvidia-smi")
     if smi is None:
         return None
@@ -153,36 +154,59 @@ def _pick_free_gpu(exclude=None):
         )
     except (subprocess.CalledProcessError, OSError):
         return None
-    free_mib = []
+
+    # 解析所有物理GPU的空闲显存
+    all_free_mib = []
     for line in output.strip().splitlines():
         line = line.strip()
-        if not line:
-            continue
-        try:
-            free_mib.append(int(line))
-        except ValueError:
-            continue
-    if not free_mib:
+        if line:
+            try:
+                all_free_mib.append(int(line))
+            except ValueError:
+                all_free_mib.append(0)
+
+    if not all_free_mib:
         return None
+
+    # 获取可见GPU列表，限制候选范围
+    visible_gpus = _parse_visible_gpus()
+    if visible_gpus is None:
+        # 没有设置CUDA_VISIBLE_DEVICES，所有GPU都可用
+        candidates = list(range(len(all_free_mib)))
+    elif not visible_gpus:
+        return None
+    else:
+        candidates = [pid for pid in visible_gpus if pid < len(all_free_mib)]
+
+    # 排除指定的GPU
     exclude = set(exclude or [])
-    candidates = [i for i in range(len(free_mib)) if i not in exclude]
+    candidates = [pid for pid in candidates if pid not in exclude]
+
     if not candidates:
         return None
-    best_idx = int(max(candidates, key=lambda i: free_mib[i]))
-    if free_mib[best_idx] < VDA_MIN_FREE_GB * 1024:
+
+    # 选择空闲显存最大的GPU
+    best_physical = max(candidates, key=lambda pid: all_free_mib[pid])
+
+    if all_free_mib[best_physical] < VDA_MIN_FREE_GB * 1024:
         return None
-    return best_idx
+
+    return best_physical
 
 def _pick_free_gpus(num_needed):
+    """返回逻辑GPU ID列表，正确处理CUDA_VISIBLE_DEVICES"""
     if PI3X_GPU_LIST:
+        # 用户手动指定的GPU列表，假设是逻辑ID
         ids = [int(item) for item in PI3X_GPU_LIST.split(",") if item.strip().isdigit()]
         if ids:
             return [ids[i % len(ids)] for i in range(num_needed)]
     if not PI3X_AUTO_GPU:
         return [i for i in range(num_needed)]
+
     smi = shutil.which("nvidia-smi")
     if smi is None:
         return [None for _ in range(num_needed)]
+
     try:
         output = subprocess.check_output(
             [smi, "--query-gpu=memory.free", "--format=csv,nounits,noheader"],
@@ -190,22 +214,64 @@ def _pick_free_gpus(num_needed):
         )
     except (subprocess.CalledProcessError, OSError):
         return [None for _ in range(num_needed)]
-    free_mib = []
+
+    # 解析所有物理GPU的空闲显存
+    all_free_mib = []
     for line in output.strip().splitlines():
         line = line.strip()
-        if not line:
-            continue
-        try:
-            free_mib.append(int(line))
-        except ValueError:
-            continue
-    if not free_mib:
+        if line:
+            try:
+                all_free_mib.append(int(line))
+            except ValueError:
+                all_free_mib.append(0)
+
+    if not all_free_mib:
         return [None for _ in range(num_needed)]
-    order = sorted(range(len(free_mib)), key=lambda i: free_mib[i], reverse=True)
-    eligible = [i for i in order if free_mib[i] >= PI3X_MIN_FREE_GB * 1024]
-    if not eligible:
+
+    # 获取可见GPU列表（物理ID）
+    visible_gpus = _parse_visible_gpus()
+
+    # 确定候选GPU，建立物理ID -> 逻辑ID映射
+    if visible_gpus is None:
+        # 没有设置CUDA_VISIBLE_DEVICES，物理ID = 逻辑ID
+        candidates = list(range(len(all_free_mib)))
+        physical_to_logical = {i: i for i in candidates}
+    elif not visible_gpus:
+        # CUDA_VISIBLE_DEVICES为空，无GPU可用
         return [None for _ in range(num_needed)]
-    return [eligible[i % len(eligible)] for i in range(num_needed)]
+    else:
+        # 有设置CUDA_VISIBLE_DEVICES，只考虑可见的GPU
+        candidates = [pid for pid in visible_gpus if pid < len(all_free_mib)]
+        physical_to_logical = {pid: idx for idx, pid in enumerate(candidates)}
+
+    if not candidates:
+        return [None for _ in range(num_needed)]
+
+    # 按空闲显存排序，筛选满足最小显存要求的GPU
+    min_free_mib = PI3X_MIN_FREE_GB * 1024
+    eligible_physical = [
+        pid for pid in candidates
+        if all_free_mib[pid] >= min_free_mib
+    ]
+    eligible_physical.sort(key=lambda pid: all_free_mib[pid], reverse=True)
+
+    if not eligible_physical:
+        print(f"[GPU] Warning: No GPU with >= {PI3X_MIN_FREE_GB}GB free memory", file=sys.stderr)
+        print(f"[GPU] Available GPUs (physical): {candidates}", file=sys.stderr)
+        print(f"[GPU] Free memory (MiB): {[all_free_mib[pid] for pid in candidates]}", file=sys.stderr)
+        return [None for _ in range(num_needed)]
+
+    # 返回逻辑GPU ID（轮询分配）
+    result = []
+    for i in range(num_needed):
+        physical_id = eligible_physical[i % len(eligible_physical)]
+        logical_id = physical_to_logical[physical_id]
+        result.append(logical_id)
+
+    print(f"[GPU] Selected logical IDs: {result}", file=sys.stderr)
+    print(f"[GPU] Mapping: logical -> physical: {[(r, eligible_physical[i % len(eligible_physical)]) for i, r in enumerate(result)]}", file=sys.stderr)
+
+    return result
 
 def run_pi3x_with_vda(pi3x_model, proc_id, video_name, device):
     frame_dir = Path.cwd() / f"{proc_id}_frames_nontemp"
